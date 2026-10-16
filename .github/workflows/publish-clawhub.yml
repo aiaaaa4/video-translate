@@ -1,0 +1,53 @@
+name: Publish ClawHub skill
+
+on:
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: Skill to publish
+        required: true
+        type: choice
+        options:
+          - video-translate
+      changelog:
+        description: Short public summary of this release
+        required: true
+        type: string
+      dry_run:
+        description: Preview the selected release without creating a version
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-clawhub-${{ inputs.skill }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Validate repository and tests
+        run: |
+          python3 tools/validate_repo.py
+          python3 -m unittest discover -s tests
+      - name: Publish selected skill
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+          RELEASE_CHANGELOG: ${{ inputs.changelog }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_SKILL: ${{ inputs.skill }}
+        run: |
+          args=(--skill "$RELEASE_SKILL" --changelog "$RELEASE_CHANGELOG")
+          if [[ "$RELEASE_DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python3 tools/release_skill.py "${args[@]}"

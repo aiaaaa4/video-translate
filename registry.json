@@ -1,0 +1,40 @@
+{
+  "namespace": "aiaaaa4",
+  "brand": {
+    "display_name_zh": "AI落地第四声",
+    "username": "aiaaaa4",
+    "canonical_id": "aiaaaa4"
+  },
+  "repository": {
+    "owner": "aiaaaa4",
+    "name": "video-translate",
+    "branch": "main",
+    "layout": "single-skill"
+  },
+  "items": [
+    {
+      "kind": "skill",
+      "slug": "video-translate",
+      "skill_id": "aiaaaa4.video-translate",
+      "display_name": "人工级视频字幕翻译",
+      "path": "skills/video-translate",
+      "version": "1.10.0",
+      "platforms": [
+        "github",
+        "clawhub",
+        "skills.sh",
+        "skillhub",
+        "skillsmp"
+      ],
+      "clawhub": {
+        "package": "@aiaaaa4/video-translate",
+        "topics": [
+          "subtitle",
+          "translation",
+          "video",
+          "aiaaaa4"
+        ]
+      }
+    }
+  ]
+}

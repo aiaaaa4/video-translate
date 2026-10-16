@@ -1,0 +1,45 @@
+{
+  "media": "example.mp4",
+  "model": "sample",
+  "language": "en",
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.0,
+      "end": 8.4,
+      "text": "If price breaks above the prior day high, we do not chase the move.",
+      "words": [
+        {"word": "If", "start": 0.0, "end": 0.2},
+        {"word": "price", "start": 0.22, "end": 0.5},
+        {"word": "breaks", "start": 0.52, "end": 0.88},
+        {"word": "above", "start": 0.9, "end": 1.2},
+        {"word": "the", "start": 1.22, "end": 1.32},
+        {"word": "prior", "start": 1.34, "end": 1.72},
+        {"word": "day", "start": 1.74, "end": 1.94},
+        {"word": "high", "start": 1.96, "end": 2.24},
+        {"word": "we", "start": 2.8, "end": 2.94},
+        {"word": "do", "start": 2.96, "end": 3.08},
+        {"word": "not", "start": 3.1, "end": 3.28},
+        {"word": "chase", "start": 3.3, "end": 3.66},
+        {"word": "the", "start": 3.68, "end": 3.78},
+        {"word": "move", "start": 3.8, "end": 4.12}
+      ]
+    }
+  ],
+  "words": [
+    {"word": "If", "start": 0.0, "end": 0.2},
+    {"word": "price", "start": 0.22, "end": 0.5},
+    {"word": "breaks", "start": 0.52, "end": 0.88},
+    {"word": "above", "start": 0.9, "end": 1.2},
+    {"word": "the", "start": 1.22, "end": 1.32},
+    {"word": "prior", "start": 1.34, "end": 1.72},
+    {"word": "day", "start": 1.74, "end": 1.94},
+    {"word": "high", "start": 1.96, "end": 2.24},
+    {"word": "we", "start": 2.8, "end": 2.94},
+    {"word": "do", "start": 2.96, "end": 3.08},
+    {"word": "not", "start": 3.1, "end": 3.28},
+    {"word": "chase", "start": 3.3, "end": 3.66},
+    {"word": "the", "start": 3.68, "end": 3.78},
+    {"word": "move", "start": 3.8, "end": 4.12}
+  ]
+}

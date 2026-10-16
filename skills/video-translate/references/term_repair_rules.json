@@ -1,0 +1,306 @@
+{
+  "_comment": "Rules for the required ASR split-word/proper-name/term repair step. Never apply these to SRC_RAW; only repair SRC_DISPLAY and ZH. The qa_* sections drive final_qa.py domain warnings; keep them in sync with the repair rules when adding terms.",
+  "qa_bad_zh_terms": [
+    {
+      "term": "黄牛",
+      "note": "scalper should be 剥头皮交易者"
+    },
+    {
+      "term": "公允价值缺口",
+      "note": "prefer 公平价值缺口 / FVG in trading subtitles"
+    },
+    {
+      "term": "激进买方",
+      "note": "prefer 主动买盘"
+    },
+    {
+      "term": "激进卖方",
+      "note": "prefer 主动卖盘"
+    },
+    {
+      "term": "业绩",
+      "note": "prefer 交易表现 / 收益表现 when about trading performance"
+    },
+    {
+      "term": "首个红日",
+      "note": "the/first red day in trading-pattern context should be 首阴日"
+    },
+    {
+      "term": "第一红日",
+      "note": "the/first red day in trading-pattern context should be 首阴日"
+    },
+    {
+      "term": "首个红色交易日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "第一个红色交易日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首个红色K线日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首个红色K线",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首个下跌日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "第一个下跌日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首根阴线",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首个阴线交易日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "首个阴线日",
+      "note": "first red day should be unified as 首阴日 in this workflow"
+    },
+    {
+      "term": "伽马",
+      "note": "option Greek gamma should remain uppercase English: GAMMA"
+    },
+    {
+      "term": "德尔塔",
+      "note": "option Greek delta should remain uppercase English: DELTA"
+    },
+    {
+      "term": "维加",
+      "note": "option Greek vega should remain uppercase English: VEGA"
+    },
+    {
+      "term": "西塔",
+      "note": "option Greek theta should remain uppercase English: THETA"
+    },
+    {
+      "term": "希腊字母 Gamma",
+      "note": "option Greeks should be displayed directly as uppercase English"
+    }
+  ],
+  "qa_split_display_patterns": [
+    {
+      "pattern": "\\btrade pro academy\\b",
+      "preferred": "TradePro Academy"
+    },
+    {
+      "pattern": "\\bl\\s+lc\\b",
+      "preferred": "LLC"
+    },
+    {
+      "pattern": "\\bc\\s+ci\\b",
+      "preferred": "CCI"
+    },
+    {
+      "pattern": "\\btrading view\\b",
+      "preferred": "TradingView"
+    },
+    {
+      "pattern": "\\bpap\\s+az\\s+ov\\b",
+      "preferred": "Papazov"
+    },
+    {
+      "pattern": "\\biv\\s+an\\s+lab\\s+ri\\b",
+      "preferred": "Ivan Labrie"
+    },
+    {
+      "pattern": "\\baccum\\s+ulates\\b",
+      "preferred": "accumulates"
+    },
+    {
+      "pattern": "\\bresist\\s+ances\\b",
+      "preferred": "resistances"
+    },
+    {
+      "pattern": "\\bfrom\\s+tony\\b",
+      "preferred": "from twenty"
+    }
+  ],
+  "src_display": [
+    {
+      "pattern": "\\bTrade Pro Academy\\b",
+      "replacement": "TradePro Academy",
+      "note": "Brand name"
+    },
+    {
+      "pattern": "\\bL LC\\b|\\bLlc\\b",
+      "replacement": "LLC",
+      "note": "Company suffix"
+    },
+    {
+      "pattern": "\\bC CI\\b|\\bc ci\\b",
+      "replacement": "CCI",
+      "note": "Indicator name"
+    },
+    {
+      "pattern": "\\bTrading View\\b",
+      "replacement": "TradingView",
+      "note": "Platform name"
+    },
+    {
+      "pattern": "\\bPap Az Ov\\b|\\bPap az ov\\b",
+      "replacement": "Papazov",
+      "note": "Proper name"
+    },
+    {
+      "pattern": "\\bIv An Lab Ri\\b|\\bIv an lab ri\\b",
+      "replacement": "Ivan Labrie",
+      "note": "Proper name"
+    },
+    {
+      "pattern": "\\baccum ulates\\b",
+      "replacement": "accumulates",
+      "note": "ASR split word"
+    },
+    {
+      "pattern": "\\bresist ances\\b",
+      "replacement": "resistances",
+      "note": "ASR split word"
+    },
+    {
+      "pattern": "\\bfrom\\s+Tony\\b",
+      "replacement": "from twenty",
+      "note": "ASR misheard twenty as Tony in date/number context"
+    },
+    {
+      "pattern": "(?i)\\bgamma\\b",
+      "replacement": "GAMMA",
+      "note": "Option Greek display style"
+    },
+    {
+      "pattern": "(?i)\\bdelta\\b",
+      "replacement": "DELTA",
+      "note": "Option Greek display style"
+    },
+    {
+      "pattern": "(?i)\\bvega\\b",
+      "replacement": "VEGA",
+      "note": "Option Greek display style"
+    },
+    {
+      "pattern": "(?i)\\btheta\\b",
+      "replacement": "THETA",
+      "note": "Option Greek display style"
+    }
+  ],
+  "zh": [
+    {
+      "pattern": "首阴日就会变成首阴日",
+      "replacement": "首阴日就会变成亏损日",
+      "note": "Repair over-normalized first red day / first losing day sentence"
+    },
+    {
+      "pattern": "首个红色交易日|第一个红色交易日|首个红色K线日|首个红色K线|首个下跌日|第一个下跌日|首个阴线交易日|首个阴线日|首根阴线",
+      "replacement": "首阴日",
+      "note": "Normalize first red day variants"
+    },
+    {
+      "pattern": "今年\\s*alone\\s*已",
+      "replacement": "光今年就已",
+      "note": "Translate leftover alone in year-alone context"
+    },
+    {
+      "pattern": "\\s*alone\\s*已",
+      "replacement": "就已",
+      "note": "Translate leftover alone before 已"
+    },
+    {
+      "pattern": "(?i)the first red day|first red day|首个红日|第一红日",
+      "replacement": "首阴日",
+      "note": "Trading pattern term; do not apply this to first losing day"
+    },
+    {
+      "pattern": "来自托尼",
+      "replacement": "从2015年开始",
+      "note": "ASR context repair: from twenty, starting from 2015, not from Tony"
+    },
+    {
+      "pattern": "源头来自托尼",
+      "replacement": "从2015年开始",
+      "note": "ASR context repair: from twenty, starting from 2015, not from Tony"
+    },
+    {
+      "pattern": "黄牛",
+      "replacement": "剥头皮交易者",
+      "note": "Trading translation"
+    },
+    {
+      "pattern": "剥头皮交易员党",
+      "replacement": "剥头皮交易者",
+      "note": "Repair qwen-mt hallucinated suffix in scalper translations"
+    },
+    {
+      "pattern": "越狱",
+      "replacement": "突破",
+      "note": "In this trading-only workflow, break out means price breakout rather than jailbreak"
+    },
+    {
+      "pattern": "公允价值缺口",
+      "replacement": "公平价值缺口",
+      "note": "Trading-community wording"
+    },
+    {
+      "pattern": "激进买方",
+      "replacement": "主动买盘",
+      "note": "Order-flow wording"
+    },
+    {
+      "pattern": "激进卖方",
+      "replacement": "主动卖盘",
+      "note": "Order-flow wording"
+    },
+    {
+      "pattern": "业绩",
+      "replacement": "交易表现",
+      "note": "Subtitle style"
+    },
+    {
+      "pattern": "(?i)CCI\\s+with\\s+averages?|CCI、均线|CCI、平均线",
+      "replacement": "CCI 和 CCI 的平均线",
+      "note": "Direct repair for untranslated or over-generic CCI with averages phrase"
+    },
+    {
+      "pattern": "。因为",
+      "replacement": "，因为",
+      "note": "Subtitle flow: avoid hard period before a because-clause"
+    },
+    {
+      "pattern": "。也就是",
+      "replacement": "，也就是",
+      "note": "Subtitle flow: keep explanatory clause connected"
+    },
+    {
+      "pattern": "。现在\\s*(?=\\d)",
+      "replacement": "，现在 ",
+      "note": "Subtitle flow: keep numeric continuation connected"
+    },
+    {
+      "pattern": "伽马|γ|Gamma|gamma",
+      "replacement": "GAMMA",
+      "note": "Option Greek: keep uppercase English"
+    },
+    {
+      "pattern": "德尔塔|δ|Delta|delta",
+      "replacement": "DELTA",
+      "note": "Option Greek: keep uppercase English"
+    },
+    {
+      "pattern": "维加|Vega|vega",
+      "replacement": "VEGA",
+      "note": "Option Greek: keep uppercase English"
+    },
+    {
+      "pattern": "西塔|Theta|theta",
+      "replacement": "THETA",
+      "note": "Option Greek: keep uppercase English"
+    }
+  ]
+}

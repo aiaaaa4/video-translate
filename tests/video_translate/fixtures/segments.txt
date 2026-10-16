@@ -1,0 +1,11 @@
+[SEG 0001]
+SRC_RAW: if price breaks above the prior day high
+SRC_DISPLAY: If price breaks above the prior day high,
+ZH: 如果价格突破前一日高点，
+[/SEG]
+
+[SEG 0002]
+SRC_RAW: we do not chase the move
+SRC_DISPLAY: we do not chase the move.
+ZH: 我们不要追涨。
+[/SEG]
