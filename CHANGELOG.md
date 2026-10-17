@@ -2,6 +2,10 @@
 
 本仓库只维护 `aiaaaa4.video-translate` 一个 Skill。版本号以 `registry.json` 为准，详细推理见对应 Git 提交。
 
+## 1.13.1
+
+- 按定稿调整首次说明与问卷第 8 条：改为「面向本地视频」「选定视频的音频」，并写明上传目标是**官方**阿里百炼的临时存储；去掉「异步」字样。
+
 ## 1.13.0
 
 - 模型白名单收窄到唯一一个 `qwen-audio-3.1-asr-flash-filetrans`；`qwen-audio-3.0-asr-flash-filetrans` 与 `fun-asr` 被移除，设置成这两个值会直接报错而不是静默替换。
