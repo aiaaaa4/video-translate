@@ -21,7 +21,8 @@ class EnvSetupTest(unittest.TestCase):
             contents = env_file.read_text(encoding="utf-8")
             self.assertIn("DASHSCOPE_API_KEY=", contents)
             self.assertIn("ALIYUN_WORKSPACE_ID=", contents)
-            self.assertIn("OKFILE_TOKEN=", contents)
+            self.assertIn("ALIYUN_ASR_MODEL=qwen-audio-3.1-asr-flash-filetrans", contents)
+            self.assertNotIn("OKFILE_TOKEN", contents)
             self.assertEqual(env_file.stat().st_mode & 0o077, 0)
 
 

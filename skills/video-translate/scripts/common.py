@@ -13,7 +13,7 @@ from typing import Any, Iterable
 WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 
 # Provider credentials this Skill needs, and how the local env file is located.
-CREDENTIAL_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN")
+CREDENTIAL_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID")
 ENV_FILE_VARIABLE = "ALIYUN_ENV_FILE"
 ENV_SEARCH_DEPTH = 4
 

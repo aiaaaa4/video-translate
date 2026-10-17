@@ -19,7 +19,7 @@ from common import (  # noqa: E402
     search_env_file,
 )
 
-CREDENTIAL_BODY = "DASHSCOPE_API_KEY=sk-test-key\nALIYUN_WORKSPACE_ID=llm-test\nOKFILE_TOKEN=ok-test\n"
+CREDENTIAL_BODY = "DASHSCOPE_API_KEY=sk-test-key\nALIYUN_WORKSPACE_ID=llm-test\n"
 
 
 class EnvDiscoveryTest(unittest.TestCase):
@@ -29,7 +29,7 @@ class EnvDiscoveryTest(unittest.TestCase):
     could not see them and the run failed as if the provider were unreachable.
     """
 
-    MANAGED_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN", "ALIYUN_ENV_FILE")
+    MANAGED_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "ALIYUN_ENV_FILE")
 
     def setUp(self):
         self._saved = {key: os.environ.get(key) for key in self.MANAGED_KEYS}
@@ -97,27 +97,27 @@ class EnvDiscoveryTest(unittest.TestCase):
         search = prepare_env_file(None, start=skill_dir, report=False)
         self.assertIsNotNone(search.path)
         self.assertEqual(os.environ["DASHSCOPE_API_KEY"], "sk-already-exported")
-        self.assertEqual(os.environ["OKFILE_TOKEN"], "ok-test")
+        self.assertEqual(os.environ["ALIYUN_WORKSPACE_ID"], "llm-test")
 
     def test_credential_detection_ignores_unrelated_files(self):
         other = self.root / "other.env"
         other.write_text("SOMETHING_ELSE=1\n", encoding="utf-8")
         self.assertFalse(env_file_declares_credentials(other))
-        other.write_text("OKFILE_TOKEN=abc\n", encoding="utf-8")
+        other.write_text("ALIYUN_WORKSPACE_ID=abc\n", encoding="utf-8")
         self.assertTrue(env_file_declares_credentials(other))
 
     def test_apply_env_file_does_not_override_the_environment(self):
         path = self.root / "apply.env"
-        path.write_text("OKFILE_TOKEN=from-file\n", encoding="utf-8")
-        os.environ["OKFILE_TOKEN"] = "from-environment"
+        path.write_text("ALIYUN_WORKSPACE_ID=from-file\n", encoding="utf-8")
+        os.environ["ALIYUN_WORKSPACE_ID"] = "from-environment"
         apply_env_file(path)
-        self.assertEqual(os.environ["OKFILE_TOKEN"], "from-environment")
+        self.assertEqual(os.environ["ALIYUN_WORKSPACE_ID"], "from-environment")
 
 
 class MissingCredentialDiagnosisTest(unittest.TestCase):
     """A missing credential file must not read as a provider outage."""
 
-    MANAGED_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN", "ALIYUN_ASR_MODEL")
+    MANAGED_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "ALIYUN_ASR_MODEL")
 
     def setUp(self):
         self._saved = {key: os.environ.get(key) for key in self.MANAGED_KEYS}
@@ -135,12 +135,6 @@ class MissingCredentialDiagnosisTest(unittest.TestCase):
     def test_missing_credentials_are_listed_together(self):
         self.assertEqual(
             transcribe_api.missing_credentials(),
-            ["DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN"],
-        )
-        # The default synchronous path never uploads, so it must not demand an
-        # OkFile token it does not use.
-        self.assertEqual(
-            transcribe_api.missing_credentials("qwen-audio-3.1-asr-flash"),
             ["DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID"],
         )
 
@@ -165,7 +159,7 @@ class MissingCredentialDiagnosisTest(unittest.TestCase):
             self.assertIn("Missing provider credentials", captured["stderr"])
             for key in ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID"):
                 self.assertIn(key, captured["stderr"])
-            self.assertNotIn("OKFILE_TOKEN", captured["stderr"], "the sync default does not use OkFile")
+            self.assertNotIn("OKFILE_TOKEN", captured["stderr"], "no file host is involved")
             self.assertIn(str(workdir / ".env"), captured["stderr"])
 
     def test_transcribe_main_rejects_an_explicit_missing_env_file(self):

@@ -10,8 +10,8 @@ Use this skill only when the user selects a local video file or a dedicated fold
 
 1. If the input is a folder, inspect its direct children and require exactly one supported video; if there are multiple videos, list them and stop for an explicit choice. For either input form, run `video_to_subtitles.py <path> --inspect-inputs` before making claims about available assets. Treat its JSON as authoritative: it inspects the project folder and the exact `.work/input/` handoff directory for matching audio and SRT/VTT files, and classifies ambiguous containers such as WebM from their actual streams. Never replace it with a top-level-only listing or a broad recursive scan of unrelated run artifacts.
 2. Prefer one unambiguous same-basename project audio file; if none exists, reuse the sole audio candidate in the dedicated project. Otherwise extract compact audio locally with `ffmpeg`.
-3. Normalize the audio to mono 16 kHz MP3 and split it into chunks of at most five minutes (default 270 s), then submit each chunk inline as Base64 to the synchronous Alibaba ASR model. The default production path uploads nothing to a public file host, because a provider that must pull a public URL through a general CDN is the slow and unreliable part of this pipeline.
-4. Keep the word timestamps of every chunk, shift them by that chunk's start offset, and stitch them into one stream. Only when the caller explicitly selects a `-filetrans` model, upload the audio to OkFile and submit its public URL to the asynchronous model instead; never mix the two transports inside one run.
+3. Normalize the audio to mono 16 kHz MP3, upload it to Model Studio's free temporary storage, and submit the whole recording as one asynchronous filetrans job. The service returns an `oss://` URL and needs the `X-DashScope-OssResourceResolve: enable` header; no third-party file host and no public URL are involved, and long audio is never split.
+4. Poll the job, download the result JSON, and use its word timestamps directly. One job covers the whole recording, so there are no chunk offsets to stitch and no cut points inside the transcript.
 5. Use that model's words and word timestamps as the alignment source of truth.
 6. If one matching original-language SRT/VTT exists in the project folder or `.work/input/`, treat its verified in-span words as the preferred lexical correction source without changing `SRC_RAW`; never let its cue boundaries or neighboring words redefine an ASR span.
 7. Before translation, require the orchestrator to read the complete source and create a validated per-video context with `domains`, `terms`, ambiguity decisions, entities, style rules, and `tm_list`.
@@ -46,16 +46,14 @@ Do not switch ASR providers, use local Whisper, or add backup model paths unless
 - `language_hints` filters precompiled hotwords: once it is set, only hotwords whose `lang` matches the requested language apply.
 - The hotword maintenance and migration method lives in `references/asr_hotwords_en.md`. The concrete word list and the workspace/vocabulary identifiers are installation-local configuration and are never part of this Skill's source.
 
-### Two Transports, One Fixed Rule
+### One Transport: Filetrans Through Temporary Storage
 
-The word timestamps are the boundary truth either way; only the transport differs.
+The word timestamps are the boundary truth; there is exactly one way to obtain them.
 
-- **Default: chunked synchronous submission.** The audio is normalized to mono 16 kHz MP3 at 16-24 kbps, cut into chunks of at most `ALIYUN_ASR_SYNC_MAX_SECONDS` (default 270 s, never above the model's 300 s limit), and each chunk is posted inline as a Base64 data URL. Cuts prefer a detected silence within 30 s before the target so a chunk never exceeds the limit and words are not split mid-phrase. Chunks never overlap. A file that already fits in one chunk is sent as a single request.
-- **Chunk failures are never silent.** Each chunk is retried with backoff (`ALIYUN_ASR_SYNC_RETRIES`, default 3); a chunk that still fails aborts the run with its index and the underlying reason.
-- **Stitching.** Each chunk's word times are shifted by that chunk's start offset and concatenated in chunk order.
-- **Integrity gate.** Before anything downstream sees the transcript, the stitched stream must be monotonic, free of overlapping or duplicate words, and cover the audio from start to end within one second. A stream that fails this is an error, not a warning.
-- **Fallback: filetrans over a public URL.** Selecting a `-filetrans` model (or `fun-asr`) switches to the asynchronous upload path and requires `OKFILE_TOKEN`. It is kept for cases where the provider must pull the audio itself; the default path does not use it.
-- Tunables: `ALIYUN_ASR_SYNC_MAX_SECONDS` (default 270), `ALIYUN_ASR_SYNC_CONCURRENCY` (default 2), `ALIYUN_ASR_SYNC_RETRIES` (default 3), `ALIYUN_ASR_MP3_KBPS` (default 16).
+- **Single asynchronous job.** The audio is normalized to mono 16 kHz MP3, uploaded into Model Studio's free temporary storage, and submitted as one filetrans job covering the whole recording. Long audio is never split, so there are no cut points inside the transcript and no offsets to stitch.
+- **Temporary storage, not a file host.** The upload returns an `oss://` URL valid for 48 hours and requires the `X-DashScope-OssResourceResolve: enable` header on the submit call. Nothing is published to a public URL, and no OSS bucket or third-party host is involved; the service deletes the object after 48 hours.
+- **Integrity gate.** Before anything downstream sees the transcript, the word stream must be monotonic, free of overlapping or duplicate words, and cover the audio from start to end within one second. A stream that fails this is an error, not a warning.
+- **Tunables.** `ALIYUN_ASR_MODEL` pins the model, `ALIYUN_ASR_HOTWORDS_FILE` supplies inline hotwords, and `ALIYUN_ASR_MP3_KBPS` (default 64) controls the uploaded audio quality.
 
 ## Required Setup
 
@@ -63,9 +61,9 @@ Run commands from the skill folder, or copy the skill folder into the working pr
 
 User-side accounts and secrets:
 
-- OkFile account (optional, only for the explicit filetrans fallback): register at `https://www.okfile.com/`, then create or copy the API key from `https://www.okfile.com/en/account/api-keys`.
+- No third-party file host is needed: the audio goes into Model Studio's own temporary storage, which requires no extra account.
 - Alibaba Cloud / Model Studio account: get a DashScope API key at `https://help.aliyun.com/zh/model-studio/get-api-key`, copy the workspace ID from the Model Studio console, and add a small balance before batch use.
-- Required values: `DASHSCOPE_API_KEY`, `ALIYUN_WORKSPACE_ID`, and `OKFILE_TOKEN`.
+- Required values: `DASHSCOPE_API_KEY` and `ALIYUN_WORKSPACE_ID`.
 - Required media: the user-selected video file must exist locally and use a supported video extension, or the selected dedicated folder must contain exactly one such video. Audio found beside that video or under `.work/input/` is an internal workflow optimization, not a supported user input.
 
 Before starting external processing, derive the real visible title:
@@ -83,16 +81,13 @@ Use this template content:
 DASHSCOPE_API_KEY=...
 ALIYUN_WORKSPACE_ID=...
 ALIYUN_REGION=cn-beijing
-ALIYUN_ASR_MODEL=qwen-audio-3.1-asr-flash
+ALIYUN_ASR_MODEL=qwen-audio-3.1-asr-flash-filetrans
+# Optional precompiled hotword list; it only applies when its target_model matches ALIYUN_ASR_MODEL.
 ALIYUN_ASR_VOCABULARY_ID=
+# Optional local hotword JSON sent as inline hotwords.
 ALIYUN_ASR_HOTWORDS_FILE=
-# Optional chunking tunables for the default synchronous path.
-ALIYUN_ASR_SYNC_MAX_SECONDS=270
-ALIYUN_ASR_SYNC_CONCURRENCY=2
-ALIYUN_ASR_SYNC_RETRIES=3
-ALIYUN_ASR_MP3_KBPS=16
-# Only the explicit filetrans fallback needs this.
-OKFILE_TOKEN=...
+# Optional upload quality for the temporary-storage audio (16-96 kbps).
+ALIYUN_ASR_MP3_KBPS=64
 
 ```
 
@@ -102,7 +97,7 @@ The local `.env` is discovered, not assumed to sit beside the scripts:
 
 1. an explicit `--env-file` (also `--env` for the segment helper), then
 2. `$ALIYUN_ENV_FILE`, then
-3. the nearest `.env` at or above the Skill directory, then the current directory, accepted only when that file declares at least one of `DASHSCOPE_API_KEY`, `ALIYUN_WORKSPACE_ID`, or `OKFILE_TOKEN`.
+3. the nearest `.env` at or above the Skill directory, then the current directory, accepted only when that file declares `DASHSCOPE_API_KEY` or `ALIYUN_WORKSPACE_ID`.
 
 The wrapper resolves the file once and passes the resolved path to every step that needs credentials, so a step that runs with the Skill directory as its working directory still finds a `.env` kept at a workspace root. Every step reports the file it used; when none is found it names every path it searched instead of continuing silently. A caller-named file that does not exist stops the run immediately.
 
@@ -112,7 +107,7 @@ Local requirements:
 
 - Python 3.9+
 - `ffmpeg` and `ffprobe`
-- network access to Alibaba Model Studio / DashScope (OkFile only for the filetrans fallback)
+- network access to Alibaba Model Studio / DashScope, including its temporary-upload host
 - enough local disk space for temporary audio, transcripts, prompts, and subtitle outputs
 
 On a new device or first run, `preflight.py` shows the introduction, advantages, provider boundary, and credential setup. Always check the environment before processing media:
@@ -138,7 +133,7 @@ Send `preflight.py` stdout verbatim. This script is the sole first-use and quest
 First use message after environment check, in Chinese:
 
 ```text
-这套工作流会固定通过阿里同步 ASR 模型获取词级转写（本地归一化、5 分钟内切块、内联提交）；当前编排模型先通读完整源文，生成本视频专属领域提示、术语和翻译记忆。初译可选择默认的 qwen-mt-plus，或由当前 Codex / 编排模型直接完成。初译后，编排模型会再次通读原文与译文，纠正词义、按语义重分段并完成最终 QC。默认翻译为简体中文，固定输出双语 ASS/SRT。只有在你明确同意外发处理后才会发送音频和文本。
+这套工作流会固定通过阿里文件转写模型获取词级转写（本地归一化后上传到百炼临时存储，单个异步任务整片转写）；当前编排模型先通读完整源文，生成本视频专属领域提示、术语和翻译记忆。初译可选择默认的 qwen-mt-plus，或由当前 Codex / 编排模型直接完成。初译后，编排模型会再次通读原文与译文，纠正词义、按语义重分段并完成最终 QC。默认翻译为简体中文，固定输出双语 ASS/SRT。只有在你明确同意外发处理后才会发送音频和文本。
 ```
 
 The fixed questionnaire covers these fields:
@@ -148,7 +143,7 @@ The fixed questionnaire covers these fields:
 3. Translation provider: default A is qwen-mt-plus for stable, cost-effective API translation. Option B is current Agent translation and is activated only by an explicit “Agent 大模型翻译” answer plus `--translation-provider agent`.
 4. Screen context: ask whether the video contains dense or important visible text, PPT/slides, charts, software UI, code, signs, or meaningful images not fully spoken aloud. Keep it off by default; enabling it may increase time and cost.
 5. Subtitle output directory: default to the dedicated video project folder. If the user wants a different location, ask for the absolute or project-relative path and pass it with `--outputs-dir "<path>"`.
-6. External-processing consent: state that the selected audio is normalized locally, split into chunks of at most five minutes, and sent inline to the Alibaba ASR model, with no public URL involved; the OkFile upload only applies if the filetrans fallback is explicitly chosen. In qwen mode subtitle text is also sent to Alibaba qwen-mt-plus; in Agent mode it is handled by the current Agent model service. Proceed only after explicit consent.
+6. External-processing consent: state that the selected audio is normalized locally and uploaded to Alibaba Model Studio's temporary storage, where it is retained for 48 hours, so the filetrans model can transcribe it. In qwen mode subtitle text is also sent to Alibaba qwen-mt-plus; in Agent mode it is handled by the current Agent model service. Proceed only after explicit consent.
 
 Do not ask the user to select ASR, arbitrary helper/orchestration models, or normal subtitle orientation. `--inspect-inputs` reports the detected display geometry and resolved layout. Use `--subtitle-layout landscape|portrait|square` only to override proven-bad metadata, and retain that choice for every resume. Landscape, portrait, and square layouts are fixed production profiles, not per-video calibration tasks. In an ordinary run, apply the resolved profile directly and do not generate layout preview frames, request visual approval, or retune font, margins, anchor, outline, shadow, or wrapping thresholds. Generate diagnostic previews only when the user explicitly requests them or inspection/QA reports abnormal geometry or unresolved layout behavior.
 
@@ -170,7 +165,7 @@ When a run fails, identify the failure category, quote the code if present, and 
 
 - `VTZ-E001` environment or secret configuration: run `python scripts/check_env.py`; install missing Python/ffmpeg or fill `.env`.
 - `VTZ-E002` ffmpeg: install ffmpeg and rerun `python scripts/check_env.py`.
-- `VTZ-E003` OkFile: only the filetrans fallback uses it; check `OKFILE_TOKEN`, network access, quota, and cached URL age, or switch to the default synchronous path.
+- `VTZ-E003` Model Studio temporary upload: check `DASHSCOPE_API_KEY`, network access, and the upload host's reachability; the object expires after 48 hours.
 - `VTZ-E004` Alibaba ASR: check `DASHSCOPE_API_KEY`, `ALIYUN_WORKSPACE_ID`, `ALIYUN_REGION`, account balance, and service status; rerun the same command.
 - `VTZ-E005` AI segment contract or QA blocker: the AI runner must first repair `segments.txt` with `final_qa_prompt.txt` / `final_qa_report.md`, then rerun. Ask the user only if the same blocker remains after two AI repair attempts or the fix needs domain judgment.
 - `VTZ-E006` output-title localization: derive the real title from the selected media or project directory, remove the date/platform ID/extension, translate it with the domain glossary, and rerun with the same clean Chinese `--localized-title`. Never substitute a generic basename.
@@ -469,7 +464,7 @@ python scripts/finalize_run.py runs/<run-id> \
   --language en
 ```
 
-This does not call OkFile or the ASR model. It reprobes and binds the media layout before revalidating source analysis, semantic review, deterministic QA, final whole-document QC, and the complete delivery evidence before SRT/ASS export. If a completed run already renamed the project and video, the delivery manifest must exactly prove the new path; layout rebinding is then allowed only when the reprobed dimensions, rotation, resolved orientation, and complete subtitle profile remain identical. An old run without current validated artifacts must resume its missing gate or start a fresh run; never hand-export its intermediate `segments.txt`.
+This does not call the ASR model. It reprobes and binds the media layout before revalidating source analysis, semantic review, deterministic QA, final whole-document QC, and the complete delivery evidence before SRT/ASS export. If a completed run already renamed the project and video, the delivery manifest must exactly prove the new path; layout rebinding is then allowed only when the reprobed dimensions, rotation, resolved orientation, and complete subtitle profile remain identical. An old run without current validated artifacts must resume its missing gate or start a fresh run; never hand-export its intermediate `segments.txt`.
 
 ## Cleanup Completed Runs
 

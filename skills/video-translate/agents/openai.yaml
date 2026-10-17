@@ -2,7 +2,7 @@
 # Author information is for display and source identification, not an additional license restriction.
 interface:
   display_name: "人工级视频字幕翻译"
-  short_description: "发现本地项目素材，经本地切块内联的阿里同步 ASR、全文翻译审校和严格门禁交付统一中文命名的双语字幕。"
-  default_prompt: "使用 $video-translate 翻译用户明确选择的本地视频或单视频项目文件夹；先运行 scripts/preflight.py，使首次环境只显示一次介绍和初始化说明，后续直接显示固定任务问卷。拿到路径后必须先运行 video_to_subtitles.py --inspect-inputs，以确定性解析器检查项目目录和 .work/input 中匹配的音频及 SRT/VTT、显示尺寸和旋转，不得用只看顶层的目录列表代替；音频型 WebM 按实际媒体流识别。拒绝直接音频输入；文件夹有多个视频时列出并停止，不猜测。默认按显示几何自动绑定横版、竖版或方形布局；仅在元数据错误时使用 --subtitle-layout 覆盖，竖版必须固定字幕块顶部而非底部对齐。转写固定为阿里同步 ASR：音频本地归一化后按 5 分钟上限切块内联提交，词级时间戳按块偏移拼接并做完整性校验；仅显式选择 -filetrans 模型才改走 OkFile 公网链接。原字幕文字只在当前 ASR 词跨度内校正，时间边界仍以词级时间戳为准。初译使用用户选择的 qwen-mt-plus 或当前 Agent；每个 ZH 只翻译同一 SEG，再完成全文重译审校、跨段错位检查、语义重分段、确定性 QA 和最终 QC。只有全部 validated 证据、当前哈希、布局哈希和 blockers=0 才导出；随后把专用项目文件夹、原视频、ASS 和 SRT 统一为中文净标题，拒绝覆盖或改名共享/多视频目录。长任务必须持续轮询。"
+  short_description: "发现本地项目素材，经百炼临时存储上传的阿里文件转写、全文翻译审校和严格门禁交付统一中文命名的双语字幕。"
+  default_prompt: "使用 $video-translate 翻译用户明确选择的本地视频或单视频项目文件夹；先运行 scripts/preflight.py，使首次环境只显示一次介绍和初始化说明，后续直接显示固定任务问卷。拿到路径后必须先运行 video_to_subtitles.py --inspect-inputs，以确定性解析器检查项目目录和 .work/input 中匹配的音频及 SRT/VTT、显示尺寸和旋转，不得用只看顶层的目录列表代替；音频型 WebM 按实际媒体流识别。拒绝直接音频输入；文件夹有多个视频时列出并停止，不猜测。默认按显示几何自动绑定横版、竖版或方形布局；仅在元数据错误时使用 --subtitle-layout 覆盖，竖版必须固定字幕块顶部而非底部对齐。转写固定为阿里文件转写：音频本地归一化后上传到百炼免费临时存储（48 小时自动清理），以单个异步任务整片识别，落盘前校验词级时间戳单调、无重叠且覆盖全片；长音频不切块，也不经任何第三方文件中转。原字幕文字只在当前 ASR 词跨度内校正，时间边界仍以词级时间戳为准。初译使用用户选择的 qwen-mt-plus 或当前 Agent；每个 ZH 只翻译同一 SEG，再完成全文重译审校、跨段错位检查、语义重分段、确定性 QA 和最终 QC。只有全部 validated 证据、当前哈希、布局哈希和 blockers=0 才导出；随后把专用项目文件夹、原视频、ASS 和 SRT 统一为中文净标题，拒绝覆盖或改名共享/多视频目录。长任务必须持续轮询。"
 policy:
   allow_implicit_invocation: false

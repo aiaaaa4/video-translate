@@ -168,7 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--confirm-external-processing",
         action="store_true",
-        help="Required acknowledgement before audio prepared from the selected video is sent to the Alibaba ASR service (and to OkFile only on the filetrans fallback).",
+        help="Required acknowledgement before audio prepared from the selected video is uploaded to Model Studio temporary storage and sent to the Alibaba ASR service.",
     )
     parser.add_argument(
         "--env-file",
@@ -1066,9 +1066,9 @@ def classify_failure(message: str) -> tuple[str, str, list[str]]:
     if "okfile" in lower:
         return (
             "VTZ-E003",
-            "OkFile upload or URL failure",
+            "Model Studio temporary upload failure",
             [
-                "Check OKFILE_TOKEN, network access, upload quota, and whether the cached URL expired.",
+                "Check DASHSCOPE_API_KEY, network access, and whether the temporary upload host is reachable.",
                 "Rerun with the same --run-id so completed local stages can be reused.",
             ],
         )
@@ -1677,7 +1677,7 @@ def main() -> int:
         )
         print(
             "Refusing external processing without --confirm-external-processing. "
-            f"This workflow sends the selected audio to the Alibaba ASR service (OkFile only on the filetrans fallback), "
+            f"This workflow uploads the selected audio to Model Studio temporary storage and sends it to the Alibaba ASR service, "
             f"and processes transcript text with {text_destination}.",
             file=sys.stderr,
         )

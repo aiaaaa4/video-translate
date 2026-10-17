@@ -2,6 +2,15 @@
 
 本仓库只维护 `aiaaaa4.video-translate` 一个 Skill。版本号以 `registry.json` 为准，详细推理见对应 Git 提交。
 
+## 1.12.0
+
+- 转写收敛为单一通道：本地归一化为 mono/16 kHz/mp3 → 上传到百炼**免费临时存储**（48 小时自动清理）→ 单个异步 filetrans 任务整片转写。长音频不再切块，也没有块偏移需要拼接。
+- 提交 filetrans 时对 `oss://` 临时 URL 自动附 `X-DashScope-OssResourceResolve: enable`（缺失会被判 `REQUEST_INVALID_FILE_URL_VALUE`）。
+- 彻底移除 OkFile：相关常量、上传实现、错误码说明、`OKFILE_TOKEN` 凭据与 Skill 元数据声明全部删除；凭据只剩 `DASHSCOPE_API_KEY` 与 `ALIYUN_WORKSPACE_ID`。
+- 移除内联同步分块实现（`asr_sync_chunked.py`）及其 29 项测试，模型白名单只保留 filetrans 家族。
+- 新增 `ALIYUN_ASR_MP3_KBPS`（默认 64，允许 16–96）控制上传音频质量。
+- 实跑验证：合成语音 → 临时存储上传 → filetrans → 25–30 词，端到端约 14 秒。
+
 ## 1.11.3
 
 - 删除仓库级产品说明书 `docs/`，同时清除 README、SKILL.md、问卷中的指引。

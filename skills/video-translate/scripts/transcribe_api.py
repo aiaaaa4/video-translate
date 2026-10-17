@@ -13,7 +13,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -25,33 +25,18 @@ from common import (
     srt_time,
     write_json,
 )
-from asr_sync_chunked import (
-    DEFAULT_CONCURRENCY,
-    DEFAULT_MAX_CHUNK_SECONDS,
-    DEFAULT_MP3_KBPS,
-    DEFAULT_RETRIES,
-    transcribe_chunked_sync,
-)
 from media_probe import is_supported_audio, is_supported_video
 
 
-# Synchronous models take the audio inline as Base64 and cap a request at five
-# minutes, so the default path normalizes, chunks, and stitches instead of
-# handing a provider a public URL to pull.
-ASR_MODEL_QWEN_AUDIO_SYNC_31 = "qwen-audio-3.1-asr-flash"
-ASR_MODEL_QWEN_AUDIO_SYNC_30 = "qwen-audio-3.0-asr-flash"
-# Asynchronous models pull a public URL and are kept as an explicit fallback.
+# The fixed ASR stack. The filetrans family accepts the whole recording as one
+# asynchronous job, so long audio is never cut into pieces.
 ASR_MODEL_QWEN_AUDIO_31 = "qwen-audio-3.1-asr-flash-filetrans"
 ASR_MODEL_QWEN_AUDIO_30 = "qwen-audio-3.0-asr-flash-filetrans"
 ASR_MODEL_FUN_ASR = "fun-asr"
-SYNC_ASR_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_SYNC_31, ASR_MODEL_QWEN_AUDIO_SYNC_30})
-ASYNC_ASR_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30, ASR_MODEL_FUN_ASR})
-# The fixed ASR stack. Every model here must return word-level timestamps,
-# because those timestamps are the only subtitle boundary truth.
-SUPPORTED_ASR_MODELS = tuple(sorted(SYNC_ASR_MODELS | ASYNC_ASR_MODELS))
-DEFAULT_ASR_MODEL = ASR_MODEL_QWEN_AUDIO_SYNC_31
+SUPPORTED_ASR_MODELS = (ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30, ASR_MODEL_FUN_ASR)
+DEFAULT_ASR_MODEL = ASR_MODEL_QWEN_AUDIO_31
 # Inline ("instant") hotwords are accepted only by the Qwen-Audio-3.x-ASR-Flash family.
-INLINE_HOTWORD_MODELS = frozenset(SYNC_ASR_MODELS | {ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30})
+INLINE_HOTWORD_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30})
 MAX_ASR_HOTWORDS = 2000
 MAX_ASR_SUPER_HOTWORDS = 50
 ASR_SUPER_HOTWORD_WEIGHT = 50
@@ -68,8 +53,6 @@ PROVIDERS = {
 }
 
 RETRYABLE_HTTP_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
-OKFILE_UPLOAD_URL = "https://www.okfile.com/api/upload/quick"
-OKFILE_ORIGIN = "https://www.okfile.com"
 IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$", re.IGNORECASE)
 ALLOWED_ALIYUN_REGIONS = {"cn-beijing"}
 
@@ -94,11 +77,7 @@ def resolve_asr_model(requested: str | None, provider_cfg: dict) -> str:
 
 def provider_label(model: str) -> str:
     """Report the transport and family that actually produced the transcript."""
-    if model in SYNC_ASR_MODELS:
-        return "aliyun-qwen-audio-asr-sync"
-    if model in ASYNC_ASR_MODELS and model != ASR_MODEL_FUN_ASR:
-        return "aliyun-qwen-audio-asr-filetrans"
-    return "aliyun-fun-asr"
+    return "aliyun-fun-asr" if model == ASR_MODEL_FUN_ASR else "aliyun-qwen-audio-asr-filetrans"
 
 
 def validate_hotword_text(text: str) -> str | None:
@@ -256,7 +235,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--confirm-external-processing",
         action="store_true",
-        help="Required acknowledgement before the selected audio is submitted to the Alibaba ASR service (and uploaded to OkFile only on the filetrans fallback).",
+        help="Required acknowledgement before the selected audio is uploaded to Model Studio temporary storage and submitted to the Alibaba ASR service.",
     )
     parser.add_argument("--poll-interval", type=float, default=10.0, help="Seconds between async task polls.")
     parser.add_argument("--timeout", type=float, default=7200.0, help="Async task timeout in seconds.")
@@ -278,13 +257,7 @@ def prepare_env(explicit: Path | None) -> EnvFileSearch:
 
 
 def required_credentials(model: str | None = None) -> tuple[str, ...]:
-    """Credentials this path actually needs.
-
-    OkFile only exists to hand the asynchronous fallback a public URL, so the
-    synchronous path must not demand an OkFile token it never uses.
-    """
-    if model in SYNC_ASR_MODELS:
-        return tuple(key for key in CREDENTIAL_KEYS if key != "OKFILE_TOKEN")
+    """Credentials this fixed stack needs. Every model runs over the same path."""
     return CREDENTIAL_KEYS
 
 
@@ -302,6 +275,20 @@ def has_real_secret(value: str | None) -> bool:
 def require_ffmpeg() -> None:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required for audio extraction but was not found on PATH.")
+
+
+def upload_bitrate_kbps() -> int:
+    """Uploaded audio quality; the file must stay small but keep speech intact."""
+    raw = (os.environ.get("ALIYUN_ASR_MP3_KBPS") or "").strip()
+    if not raw:
+        return 64
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"ALIYUN_ASR_MP3_KBPS must be an integer, got {raw!r}") from None
+    if not 16 <= value <= 96:
+        raise RuntimeError("ALIYUN_ASR_MP3_KBPS must be between 16 and 96.")
+    return value
 
 
 def extract_audio(media: Path, out_dir: Path) -> Path:
@@ -322,7 +309,7 @@ def extract_audio(media: Path, out_dir: Path) -> Path:
         "-ar",
         "16000",
         "-b:a",
-        "64k",
+        f"{upload_bitrate_kbps()}k",
         str(audio_path),
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -426,10 +413,6 @@ def request_json(
     return json.loads(raw.decode("utf-8"))
 
 
-def okfile_token() -> str | None:
-    return os.environ.get("OKFILE_TOKEN")
-
-
 def require_https_url(url: str, label: str) -> None:
     parsed = urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname:
@@ -444,128 +427,70 @@ def validated_aliyun_base_url(workspace_id: str, region: str) -> str:
     return f"https://{workspace_id}.{region}.maas.aliyuncs.com"
 
 
-def okfile_auth_headers(token: str) -> dict[str, str]:
-    return {
-        "X-API-Key": token,
-        "User-Agent": "codex-video-subtitle-workflow/0.1",
-    }
-
-
-def okfile_public_url(response: dict) -> str:
-    public_url = str(response.get("downloadUrl") or response.get("url") or "")
-    if not public_url:
-        raise RuntimeError(f"OkFile response did not include downloadUrl or url: {response}")
-    require_https_url(public_url, "OkFile public URL")
-    return public_url
-
-
-def okfile_upload_quick(audio_path: Path, upload_url: str, token: str) -> dict:
-    body, boundary = multipart_body({}, "file", audio_path)
-    headers = okfile_auth_headers(token)
-    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-    return request_json(upload_url, method="POST", data=body, headers=headers, timeout=600)
-
-
-def put_file(url: str, data: bytes, content_type: str) -> None:
-    require_https_url(url, "OkFile signed upload URL")
-    request = Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": content_type,
-            "Content-Length": str(len(data)),
-            "User-Agent": "codex-video-subtitle-workflow/0.1",
-        },
-        method="PUT",
-    )
-    request_bytes(request, timeout=600, label="OkFile signed PUT upload")
-
-
-def okfile_upload_standard(audio_path: Path, upload_url: str, token: str, config: dict) -> dict:
-    content_type = mimetypes.guess_type(audio_path.name)[0] or "application/octet-stream"
-    preferred_part_size = int(config.get("partSize") or 10 * 1024 * 1024)
-    payload = {
-        "filename": audio_path.name,
-        "size": audio_path.stat().st_size,
-        "contentType": content_type,
-        "preferredPartSize": preferred_part_size,
-    }
-    prepare = request_json(
-        f"{OKFILE_ORIGIN}/api/upload/prepare",
-        method="POST",
-        payload=payload,
-        headers=okfile_auth_headers(token),
-    )
-    if not prepare.get("success"):
-        raise RuntimeError(f"OkFile prepare failed: {prepare}")
-
-    mode = str(prepare.get("mode") or "")
-    if mode == "single":
-        put_file(str(prepare["uploadUrl"]), audio_path.read_bytes(), content_type)
-    elif mode == "multipart":
-        part_size = int(prepare.get("partSize") or preferred_part_size)
-        with audio_path.open("rb") as file_obj:
-            for part in prepare.get("parts") or []:
-                part_number = int(part["partNumber"])
-                file_obj.seek((part_number - 1) * part_size)
-                chunk = file_obj.read(part_size)
-                print(f"Uploading OkFile part {part_number}/{prepare.get('totalParts')}...", flush=True)
-                put_file(str(part["uploadUrl"]), chunk, content_type)
-    else:
-        raise RuntimeError(f"Unknown OkFile upload mode: {prepare}")
-
-    complete = request_json(
-        f"{OKFILE_ORIGIN}/api/upload/complete",
-        method="POST",
-        payload={"id": prepare["id"]},
-        headers=okfile_auth_headers(token),
-    )
-    if complete.get("missingParts"):
-        missing = ", ".join(str(part) for part in complete["missingParts"])
-        raise RuntimeError(f"OkFile upload is incomplete. Missing parts: {missing}")
-    if not complete.get("success"):
-        raise RuntimeError(f"OkFile complete failed: {complete}")
-    return complete
-
-
-def upload_audio_to_okfile(audio_path: Path, out_dir: Path) -> str:
-    token = okfile_token()
-    if not has_real_secret(token):
-        raise RuntimeError("Missing OKFILE_TOKEN in .env. Create an OkFile API key and store the full token locally.")
-
-    upload_url = OKFILE_UPLOAD_URL
-
-    cached_response = out_dir / "okfile_upload_response.json"
-    if cached_response.exists():
-        age_seconds = time.time() - cached_response.stat().st_mtime
-        if age_seconds < 20 * 3600:
-            try:
-                public_url = okfile_public_url(json.loads(cached_response.read_text(encoding="utf-8")))
-                print(f"Using existing OkFile public URL from {cached_response}", flush=True)
-                return public_url
-            except Exception as exc:
-                print(f"Ignoring stale/invalid OkFile upload cache: {exc}", flush=True)
-
-    config = request_json(f"{OKFILE_ORIGIN}/api/upload/config", headers=okfile_auth_headers(str(token)))
-    write_json(out_dir / "okfile_upload_config.json", config)
-
-    size = audio_path.stat().st_size
-    quick_limit = int(config.get("quickUploadMaxSize") or 0)
-    if quick_limit and size <= quick_limit:
-        print(f"Uploading audio to OkFile quick endpoint ({size / 1024 / 1024:.1f} MB)...", flush=True)
-        response = okfile_upload_quick(audio_path, upload_url, str(token))
-    else:
-        print(f"Uploading audio to OkFile standard flow ({size / 1024 / 1024:.1f} MB)...", flush=True)
-        response = okfile_upload_standard(audio_path, upload_url, str(token), config)
-
-    write_json(out_dir / "okfile_upload_response.json", response)
-    public_url = okfile_public_url(response)
-    print(f"OkFile public URL: {public_url}", flush=True)
-    return public_url
-
-
 def aliyun_base_url(workspace_id: str, region: str) -> str:
     return validated_aliyun_base_url(workspace_id, region)
+
+
+DASHSCOPE_UPLOAD_URL = "https://dashscope.aliyuncs.com/api/v1/uploads"
+
+
+def fetch_upload_policy(api_key: str, model: str) -> dict:
+    """Fetch Model Studio's free temporary-storage upload policy for one model.
+
+    The temporary space removes the need for any third-party file host: the audio
+    is uploaded straight into Alibaba's own staging area and referenced by an
+    `oss://` URL that the transcription service resolves internally.
+    """
+    url = f"{DASHSCOPE_UPLOAD_URL}?action=getPolicy&model={quote(model)}"
+    response = http_json_request(url, api_key)
+    data = response.get("data")
+    if not isinstance(data, dict) or not data.get("upload_host"):
+        raise RuntimeError(f"Model Studio did not return an upload policy: {response}")
+    require_https_url(str(data["upload_host"]), "Model Studio upload host")
+    return data
+
+
+def upload_audio_to_temporary_storage(audio_path: Path, api_key: str, model: str) -> str:
+    """Upload the audio into Model Studio's temporary storage and return its oss:// URL."""
+    policy = fetch_upload_policy(api_key, model)
+    size_mb = audio_path.stat().st_size / 1024 / 1024
+    max_mb = policy.get("max_file_size_mb")
+    if max_mb:
+        try:
+            limit = float(max_mb)
+        except (TypeError, ValueError):
+            limit = 0.0
+        if limit and size_mb > limit:
+            raise RuntimeError(
+                f"Audio is {size_mb:.1f} MB but the temporary upload accepts {limit:.0f} MB; "
+                "lower ALIYUN_ASR_MP3_KBPS or shorten the input."
+            )
+    key = f"{policy.get('upload_dir') or ''}/{audio_path.name}".lstrip("/")
+    fields = {
+        "OSSAccessKeyId": str(policy["oss_access_key_id"]),
+        "Signature": str(policy["signature"]),
+        "policy": str(policy["policy"]),
+        "x-oss-object-acl": str(policy.get("x_oss_object_acl") or "private"),
+        "x-oss-forbid-overwrite": str(policy.get("x_oss_forbid_overwrite") or "true"),
+        "key": key,
+        "success_action_status": "200",
+    }
+    body, boundary = multipart_body(fields, "file", audio_path)
+    request = Request(
+        str(policy["upload_host"]),
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Content-Length": str(len(body)),
+        },
+        method="POST",
+    )
+    request_bytes(request, timeout=600, label="Model Studio temporary upload")
+    print(
+        f"Uploaded {size_mb:.1f} MB to Model Studio temporary storage (valid 48 h, no OSS bucket).",
+        flush=True,
+    )
+    return f"oss://{key}"
 
 
 def submit_aliyun_fun_asr(
@@ -601,12 +526,16 @@ def submit_aliyun_fun_asr(
         "input": {"file_urls": [file_url]},
         "parameters": parameters,
     }
+    headers = {"X-DashScope-Async": "enable"}
+    if file_url.startswith("oss://"):
+        # Model Studio requires this header to resolve an oss:// temporary URL.
+        headers["X-DashScope-OssResourceResolve"] = "enable"
     return http_json_request(
         f"{aliyun_base_url(workspace_id, region)}/api/v1/services/audio/asr/transcription",
         api_key,
         method="POST",
         payload=payload,
-        headers={"X-DashScope-Async": "enable"},
+        headers=headers,
     )
 
 
@@ -756,100 +685,6 @@ def normalize_aliyun_response(media: Path, model: str, language: str, raw: dict)
     }
 
 
-def env_positive_float(name: str, default: float) -> float:
-    raw = (os.environ.get(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        raise RuntimeError(f"{name} must be a number, got {raw!r}") from None
-    if value <= 0:
-        raise RuntimeError(f"{name} must be positive, got {value}")
-    return value
-
-
-def env_positive_int(name: str, default: int) -> int:
-    raw = (os.environ.get(name) or "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        raise RuntimeError(f"{name} must be an integer, got {raw!r}") from None
-    if value <= 0:
-        raise RuntimeError(f"{name} must be positive, got {value}")
-    return value
-
-
-def post_sync_asr(url: str, api_key: str, payload: dict) -> dict:
-    """One synchronous ASR call; SSE is disabled so the reply is a single JSON body."""
-    return http_json_request(
-        url,
-        api_key,
-        method="POST",
-        payload=payload,
-        headers={"X-DashScope-SSE": "disable"},
-    )
-
-
-def transcribe_with_sync_model(
-    args: argparse.Namespace,
-    api_key: str,
-    model: str,
-    workspace_id: str,
-    region: str,
-    hotwords: dict[str, int] | None,
-) -> int:
-    """Chunked synchronous transcription. Nothing is uploaded to OkFile."""
-    max_seconds = env_positive_float("ALIYUN_ASR_SYNC_MAX_SECONDS", DEFAULT_MAX_CHUNK_SECONDS)
-    if max_seconds > 300:
-        raise RuntimeError(
-            "ALIYUN_ASR_SYNC_MAX_SECONDS must not exceed 300 seconds, the synchronous model's per-request limit."
-        )
-    concurrency = env_positive_int("ALIYUN_ASR_SYNC_CONCURRENCY", DEFAULT_CONCURRENCY)
-    retries = env_positive_int("ALIYUN_ASR_SYNC_RETRIES", DEFAULT_RETRIES)
-    bitrate_kbps = env_positive_int("ALIYUN_ASR_MP3_KBPS", DEFAULT_MP3_KBPS)
-
-    print(
-        f"Transcribing with the synchronous ASR model {model}; chunks of at most {max_seconds:.0f}s, "
-        f"concurrency {concurrency}, {bitrate_kbps}kbps mp3. No OkFile upload on this path.",
-        flush=True,
-    )
-    transcript = transcribe_chunked_sync(
-        media=args.media,
-        out_dir=args.out_dir,
-        model=model,
-        language=args.language,
-        api_key=api_key,
-        base_url=aliyun_base_url(workspace_id, region),
-        hotwords=hotwords,
-        max_chunk_seconds=max_seconds,
-        concurrency=concurrency,
-        retries=retries,
-        bitrate_kbps=bitrate_kbps,
-        poster=post_sync_asr,
-    )
-
-    write_json(args.out_dir / "transcript_words.json", transcript)
-    write_srt(args.out_dir / "transcript_raw.srt", transcript["segments"])
-    if not args.keep_audio:
-        (args.out_dir / "asr_sync_normalized.mp3").unlink(missing_ok=True)
-        chunk_dir = args.out_dir / "asr_sync_chunks"
-        if chunk_dir.exists():
-            for leftover in chunk_dir.glob("*.mp3"):
-                leftover.unlink(missing_ok=True)
-            chunk_dir.rmdir()
-
-    print(f"Wrote {args.out_dir / 'transcript_words.json'}")
-    print(f"Wrote {args.out_dir / 'transcript_raw.srt'}")
-    print(
-        f"Words: {len(transcript['words'])}; segments: {len(transcript['segments'])}; "
-        f"duration: {transcript['duration']:.1f}s"
-    )
-    return 0
-
-
 def transcribe_aliyun_fun_asr(args: argparse.Namespace, api_key: str, model: str) -> int:
     workspace_id = args.workspace_id or os.environ.get("ALIYUN_WORKSPACE_ID")
     region = args.region or os.environ.get("ALIYUN_REGION") or "cn-beijing"
@@ -874,14 +709,11 @@ def transcribe_aliyun_fun_asr(args: argparse.Namespace, api_key: str, model: str
         return 2
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    if model in SYNC_ASR_MODELS:
-        return transcribe_with_sync_model(args, api_key, model, workspace_id, region, hotwords)
-
     audio_path: Path | None = None
-    print("Preparing selected audio for OkFile upload...", flush=True)
+    print("Preparing selected audio for transcription...", flush=True)
     audio_path = extract_audio(args.media, args.out_dir)
     print(f"Audio upload file: {audio_path} ({audio_path.stat().st_size / 1024 / 1024:.1f} MB)", flush=True)
-    args.file_url = upload_audio_to_okfile(audio_path, args.out_dir)
+    args.file_url = upload_audio_to_temporary_storage(audio_path, api_key, model)
 
     submit_path = args.out_dir / "aliyun_task_submit.json"
     result_path = args.out_dir / "aliyun_task_result.json"
@@ -1017,7 +849,7 @@ def main() -> int:
     if not args.confirm_external_processing:
         print(
             "Refusing external processing without --confirm-external-processing. "
-            "This sends the selected audio to the Alibaba ASR service (OkFile upload only on the filetrans fallback).",
+            "This uploads the selected audio to Model Studio temporary storage (48-hour retention) and sends it to the Alibaba ASR service.",
             file=sys.stderr,
         )
         return 2

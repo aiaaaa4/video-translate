@@ -18,10 +18,7 @@ from common import (
 from setup_state import mark_initialized
 
 
-# The synchronous path never uploads through OkFile, so its token is only
-# needed by the explicit filetrans fallback.
-REQUIRED_ENV = tuple(key for key in CREDENTIAL_KEYS if key != "OKFILE_TOKEN")
-OPTIONAL_ENV = tuple(key for key in CREDENTIAL_KEYS if key == "OKFILE_TOKEN")
+REQUIRED_ENV = CREDENTIAL_KEYS
 
 ENV_SETUP_HINTS = {
     "DASHSCOPE_API_KEY": (
@@ -30,11 +27,6 @@ ENV_SETUP_HINTS = {
     ),
     "ALIYUN_WORKSPACE_ID": (
         "Copy the workspace ID from the Alibaba Model Studio console (https://bailian.console.aliyun.com/)."
-    ),
-    "OKFILE_TOKEN": (
-        "Optional: only the filetrans fallback uploads through OkFile. Register at "
-        "https://www.okfile.com/ and create/copy the API key from "
-        "https://www.okfile.com/en/account/api-keys."
     ),
 }
 
@@ -108,12 +100,6 @@ def check_env_values(errors: list[str]) -> None:
                 message = f"{message} {hint}"
             errors.append(message)
 
-    for key in OPTIONAL_ENV:
-        if has_real_value(os.environ.get(key)):
-            print(f"{key}: set")
-        else:
-            print(f"{key}: not set (optional; only the filetrans fallback uploads through OkFile)")
-
     region = os.environ.get("ALIYUN_REGION") or "cn-beijing"
     print(f"ALIYUN_REGION: {region}")
 
@@ -145,7 +131,6 @@ def main() -> int:
             "ffprobe": bool(shutil.which("ffprobe")),
             "env": {key: has_real_value(os.environ.get(key)) for key in CREDENTIAL_KEYS},
             "required_env": list(REQUIRED_ENV),
-            "optional_env": list(OPTIONAL_ENV),
             "env_file": str(search.path) if search.path is not None else "",
             "env_file_explicit": search.explicit,
             "env_file_candidates": [str(candidate) for candidate in search.candidates],
