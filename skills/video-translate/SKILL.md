@@ -59,7 +59,7 @@ metadata:
 - 转写固定为阿里 ASR 模型（`ALIYUN_ASR_MODEL`，默认 `qwen-audio-3.1-asr-flash-filetrans`，可回退 `fun-asr`），因为它支持长音频任务和词级时间戳，这是字幕精确对齐的基础。没有词级时间戳的模型一律拒绝。
 - 初译公开默认选择阿里 `qwen-mt-plus`，因为它稳定、性价比高，并支持术语、翻译记忆与缓存恢复；追求极致质量时可选择当前 Agent 编排模型直接翻译，但会消耗当前 Agent 的模型额度，耗时和质量取决于所选模型。若当前环境支持，推荐在 Codex 中使用 GPT-5.6。
 - 本机需要 `DASHSCOPE_API_KEY`、`ALIYUN_WORKSPACE_ID`、`OKFILE_TOKEN`。环境缺失时，先说明用途并询问用户是否同意创建并打开本机 `.env`；只有得到明确同意后才执行 `bash scripts/open_env_setup.sh --open`。不得让用户在聊天中发送密钥。
-- 想了解完整细节时，查看 [视频翻译工作流说明书](../../docs/video-translate/视频翻译工作流说明书.md)。
+- 想了解完整细节时，查看 [视频翻译工作流说明书](https://github.com/aiaaaa4/video-translate/blob/main/docs/video-translate/%E8%A7%86%E9%A2%91%E7%BF%BB%E8%AF%91%E5%B7%A5%E4%BD%9C%E6%B5%81%E8%AF%B4%E6%98%8E%E4%B9%A6.md)。该文档属于仓库级产品说明，不在本 Skill 安装包内。
 
 用户示例：
 
