@@ -28,23 +28,21 @@ from common import (
 from media_probe import is_supported_audio, is_supported_video
 
 
-# The fixed ASR stack. The filetrans family accepts the whole recording as one
-# asynchronous job, so long audio is never cut into pieces.
+# The fixed ASR stack: exactly one model. It accepts the whole recording as one
+# asynchronous job, so long audio is never cut into pieces. Any other model name
+# is refused rather than silently substituted, because word-level timestamps are
+# the only boundary truth this workflow has.
 ASR_MODEL_QWEN_AUDIO_31 = "qwen-audio-3.1-asr-flash-filetrans"
-ASR_MODEL_QWEN_AUDIO_30 = "qwen-audio-3.0-asr-flash-filetrans"
-ASR_MODEL_FUN_ASR = "fun-asr"
-SUPPORTED_ASR_MODELS = (ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30, ASR_MODEL_FUN_ASR)
+SUPPORTED_ASR_MODELS = (ASR_MODEL_QWEN_AUDIO_31,)
 DEFAULT_ASR_MODEL = ASR_MODEL_QWEN_AUDIO_31
-# Inline ("instant") hotwords are accepted only by the Qwen-Audio-3.x-ASR-Flash family.
-INLINE_HOTWORD_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30})
+INLINE_HOTWORD_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31})
 MAX_ASR_HOTWORDS = 2000
 MAX_ASR_SUPER_HOTWORDS = 50
 ASR_SUPER_HOTWORD_WEIGHT = 50
 
 PROVIDERS = {
-    # Provider id kept stable for existing runs and CLI callers; the family now
-    # covers the Qwen-Audio-3.x synchronous and filetrans families plus Fun-ASR,
-    # which share one HTTP endpoint and one result schema.
+    # Provider id kept stable for existing runs and CLI callers. The id is a
+    # historical name; the only model behind it is the filetrans one above.
     "aliyun-fun-asr": {
         "key_env": "DASHSCOPE_API_KEY",
         "default_model": DEFAULT_ASR_MODEL,
@@ -61,8 +59,8 @@ def resolve_asr_model(requested: str | None, provider_cfg: dict) -> str:
     """Resolve the ASR model from ``--model``, then ``ALIYUN_ASR_MODEL``, then the default.
 
     ``ALIYUN_ASR_MODEL`` was documented in the ``.env`` template but never read, so
-    every run silently used the provider default. Reading it here makes the fixed
-    stack pinnable and keeps ``fun-asr`` available as a rollback.
+    every run silently used the provider default. Reading it here keeps the single
+    supported model explicit and makes a stale value fail loudly.
     """
     supported = tuple(provider_cfg.get("supported_models") or ())
     candidate = (requested or os.environ.get("ALIYUN_ASR_MODEL") or provider_cfg["default_model"]).strip()
@@ -77,7 +75,7 @@ def resolve_asr_model(requested: str | None, provider_cfg: dict) -> str:
 
 def provider_label(model: str) -> str:
     """Report the transport and family that actually produced the transcript."""
-    return "aliyun-fun-asr" if model == ASR_MODEL_FUN_ASR else "aliyun-qwen-audio-asr-filetrans"
+    return "aliyun-qwen-audio-asr-filetrans"
 
 
 def validate_hotword_text(text: str) -> str | None:

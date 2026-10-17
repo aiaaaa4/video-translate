@@ -12,7 +12,6 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import transcribe_api  # noqa: E402
 from transcribe_api import (  # noqa: E402
-    ASR_MODEL_FUN_ASR,
     EnvFileSearch,
     ASR_MODEL_QWEN_AUDIO_31,
     PROVIDERS,
@@ -42,12 +41,14 @@ class AsrModelSelectionTest(unittest.TestCase):
         self.assertEqual(self.provider_cfg["default_model"], ASR_MODEL_QWEN_AUDIO_31)
         self.assertEqual(resolve_asr_model(None, self.provider_cfg), ASR_MODEL_QWEN_AUDIO_31)
 
-    def test_env_var_pins_the_model(self):
-        os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_FUN_ASR
-        self.assertEqual(resolve_asr_model(None, self.provider_cfg), ASR_MODEL_FUN_ASR)
+    def test_a_retired_model_in_the_env_var_is_refused(self):
+        # Narrowing the stack must fail loudly instead of silently substituting.
+        os.environ["ALIYUN_ASR_MODEL"] = "fun-asr"
+        with self.assertRaises(RuntimeError):
+            resolve_asr_model(None, self.provider_cfg)
 
     def test_explicit_argument_beats_env_var(self):
-        os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_FUN_ASR
+        os.environ["ALIYUN_ASR_MODEL"] = "fun-asr"
         self.assertEqual(resolve_asr_model(ASR_MODEL_QWEN_AUDIO_31, self.provider_cfg), ASR_MODEL_QWEN_AUDIO_31)
 
     def test_model_outside_the_fixed_stack_is_rejected(self):
@@ -59,8 +60,6 @@ class AsrModelSelectionTest(unittest.TestCase):
 
     def test_provider_label_reports_the_real_family(self):
         self.assertEqual(provider_label(ASR_MODEL_QWEN_AUDIO_31), "aliyun-qwen-audio-asr-filetrans")
-        self.assertEqual(provider_label("qwen-audio-3.0-asr-flash-filetrans"), "aliyun-qwen-audio-asr-filetrans")
-        self.assertEqual(provider_label(ASR_MODEL_FUN_ASR), "aliyun-fun-asr")
 
 
 class AsrHotwordTest(unittest.TestCase):
@@ -173,10 +172,6 @@ class AsrSubmitPayloadTest(unittest.TestCase):
         payload = self._capture(hotwords={"GEX": 4, "极值位": 50})["payload"]
         self.assertEqual(payload["parameters"]["vocabulary"], {"GEX": 4, "极值位": 50})
 
-    def test_inline_hotwords_are_rejected_for_fun_asr(self):
-        with self.assertRaises(RuntimeError):
-            self._capture(model=ASR_MODEL_FUN_ASR, hotwords={"GEX": 4})
-
 
 class AsrWordTimestampTest(unittest.TestCase):
     def test_word_timestamps_are_required(self):
@@ -244,7 +239,7 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
         captured: dict = {}
 
         def fake_prepare_env(explicit):
-            os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_FUN_ASR
+            os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_QWEN_AUDIO_31
             return EnvFileSearch(path=None, candidates=(), explicit=False)
 
         def fake_transcribe(args, api_key, model):
@@ -259,7 +254,7 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
             exit_code = transcribe_api.main()
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(captured["model"], ASR_MODEL_FUN_ASR)
+        self.assertEqual(captured["model"], ASR_MODEL_QWEN_AUDIO_31)
 
     def test_hotwords_file_env_var_reaches_the_cli_namespace(self):
         # The wrapper spawns this script without --hotwords-file, so the env var is

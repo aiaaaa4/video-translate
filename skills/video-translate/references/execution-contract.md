@@ -39,7 +39,7 @@ Do not switch ASR providers, use local Whisper, or add backup model paths unless
 
 ### Fixed ASR Model And Hotword Binding
 
-- `ALIYUN_ASR_MODEL` pins the model. Supported values are `qwen-audio-3.1-asr-flash-filetrans` (default), `qwen-audio-3.0-asr-flash-filetrans`, and the `fun-asr` rollback. Anything else is refused, because the workflow depends on the word-level timestamps these models return.
+- `ALIYUN_ASR_MODEL` pins the model. The only supported value is `qwen-audio-3.1-asr-flash-filetrans`; anything else is refused rather than silently substituted, because the workflow depends on the word-level timestamps this model returns.
 - Word-level timestamps are mandatory. If a result carries sentence text but no `sentences[].words[]`, transcription fails loudly instead of emitting a transcript that has no boundary truth.
 - A precompiled hotword list (`vocabulary_id`) is bound to the `target_model` it was created with, and that binding cannot be changed. A list created for another model is accepted silently while its hotwords do not apply, so verify the list's `target_model` before trusting recognition quality; `tools/migrate_asr_hotwords.py` queries and exports it.
 - Inline hotwords (`ALIYUN_ASR_HOTWORDS_FILE`, sent as `parameters.vocabulary`) work only on the Qwen-Audio-3.x models. They need no precompiled list and avoid the binding problem entirely. Weights are `1`-`5`, plus `50` for at most 50 "super" hotwords; at most 2000 hotwords are used per request.
