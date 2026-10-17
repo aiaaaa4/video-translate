@@ -102,5 +102,31 @@ class TransportWordingTest(unittest.TestCase):
                     self.assertNotIn(phrase, body, f"{path.name} still describes a removed transport")
 
 
+class RemovedTransportGuardTest(unittest.TestCase):
+    """OkFile is gone for good: the audio goes straight into Model Studio storage.
+
+    Nothing shipped may mention the removed file host again, so a regression here
+    fails the suite instead of quietly reintroducing a second transport.
+    """
+
+    TEXT_SUFFIXES = {".md", ".py", ".sh", ".yaml", ".yml", ".json", ".txt"}
+
+    def test_shipped_skill_and_readme_never_mention_okfile(self):
+        package = ROOT / "skills" / "video-translate"
+        targets = [p for p in package.rglob("*") if p.is_file() and p.suffix in self.TEXT_SUFFIXES]
+        targets.append(ROOT / "README.md")
+        self.assertTrue(targets, "expected files to scan")
+        for path in targets:
+            body = path.read_text(encoding="utf-8", errors="ignore").lower()
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                self.assertNotIn("okfile", body, f"{path.relative_to(ROOT)} still references the removed file host")
+
+    def test_credentials_are_the_two_alibaba_values(self):
+        sys.path.insert(0, str(ROOT / "skills/video-translate/scripts"))
+        import common
+
+        self.assertEqual(common.CREDENTIAL_KEYS, ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID"))
+
+
 if __name__ == "__main__":
     unittest.main()

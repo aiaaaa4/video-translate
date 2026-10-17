@@ -1063,7 +1063,7 @@ def classify_failure(message: str) -> tuple[str, str, list[str]]:
                 "Remove any leading date and trailing platform ID, translate the title to Chinese with the domain glossary, and pass only that title through --localized-title.",
             ],
         )
-    if "okfile" in lower:
+    if "temporary upload" in lower or "upload policy" in lower or "temporary storage" in lower:
         return (
             "VTZ-E003",
             "Model Studio temporary upload failure",

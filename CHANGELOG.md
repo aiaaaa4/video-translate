@@ -2,6 +2,12 @@
 
 本仓库只维护 `aiaaaa4.video-translate` 一个 Skill。版本号以 `registry.json` 为准，详细推理见对应 Git 提交。
 
+## 1.12.1
+
+- 修掉错误分类里已失效的 `okfile` 匹配，改为识别新的临时上传失败（`VTZ-E003`）。
+- 修正执行契约中仍写着"默认同步模型、filetrans 只是兜底"的陈旧描述。
+- 新增硬守卫测试：安装包与 README 中出现 `okfile` 即失败；凭据必须恰为 `DASHSCOPE_API_KEY` 与 `ALIYUN_WORKSPACE_ID`。
+
 ## 1.12.0
 
 - 转写收敛为单一通道：本地归一化为 mono/16 kHz/mp3 → 上传到百炼**免费临时存储**（48 小时自动清理）→ 单个异步 filetrans 任务整片转写。长音频不再切块，也没有块偏移需要拼接。
