@@ -10,10 +10,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from common import (
+    CREDENTIAL_KEYS,
+    describe_env_search,
+    prepare_env_file,
+)
 from setup_state import mark_initialized
 
 
-REQUIRED_ENV = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN")
+REQUIRED_ENV = CREDENTIAL_KEYS
 
 ENV_SETUP_HINTS = {
     "DASHSCOPE_API_KEY": (
@@ -32,7 +37,16 @@ ENV_SETUP_HINTS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check the video subtitle workflow environment.")
-    parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit local .env path. Omit to discover one: $ALIYUN_ENV_FILE, then the nearest "
+            ".env at or above the Skill directory and the current directory that declares a "
+            "provider credential key."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Print a machine-readable JSON result for automation runners.")
     parser.add_argument(
         "--no-mark-initialized",
@@ -40,17 +54,6 @@ def parse_args() -> argparse.Namespace:
         help="Do not record successful first-use initialization for this user environment.",
     )
     return parser.parse_args()
-
-
-def load_env(path: Path) -> None:
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def has_real_value(value: str | None) -> bool:
@@ -107,10 +110,17 @@ def check_env_values(errors: list[str]) -> None:
 
 def main() -> int:
     args = parse_args()
-    load_env(args.env_file)
+    search = prepare_env_file(args.env_file, start=Path(__file__).resolve().parent, report=False)
 
     errors: list[str] = []
     print(f"OS: {platform.system()} {platform.release()} ({platform.machine()})")
+    if search.path is not None:
+        print(describe_env_search(search))
+    elif search.explicit:
+        errors.append(f"[VTZ-E001] {describe_env_search(search)}")
+        print(describe_env_search(search), file=sys.stderr)
+    else:
+        print(describe_env_search(search))
     check_python(errors)
     check_ffmpeg_tools(errors)
     check_env_values(errors)
@@ -124,7 +134,9 @@ def main() -> int:
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "ffprobe": bool(shutil.which("ffprobe")),
             "env": {key: has_real_value(os.environ.get(key)) for key in REQUIRED_ENV},
-            "env_file": str(args.env_file),
+            "env_file": str(search.path) if search.path is not None else "",
+            "env_file_explicit": search.explicit,
+            "env_file_candidates": [str(candidate) for candidate in search.candidates],
             "errors": errors,
             "initialization_state": str(state_path) if state_path else "",
         }

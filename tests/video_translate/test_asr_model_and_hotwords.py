@@ -13,6 +13,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import transcribe_api  # noqa: E402
 from transcribe_api import (  # noqa: E402
     ASR_MODEL_FUN_ASR,
+    EnvFileSearch,
     ASR_MODEL_QWEN_AUDIO_31,
     PROVIDERS,
     inline_hotwords_map,
@@ -216,26 +217,36 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
     ignored a `.env`-only setting.
     """
 
+    MANAGED_KEYS = (
+        "ALIYUN_ASR_MODEL",
+        "ALIYUN_ASR_HOTWORDS_FILE",
+        "DASHSCOPE_API_KEY",
+        "ALIYUN_WORKSPACE_ID",
+        "OKFILE_TOKEN",
+    )
+
     def setUp(self):
-        self._saved = {key: os.environ.pop(key, None) for key in ("ALIYUN_ASR_MODEL", "ALIYUN_ASR_HOTWORDS_FILE")}
-        self._saved_key = os.environ.get("DASHSCOPE_API_KEY")
+        self._saved = {key: os.environ.get(key) for key in self.MANAGED_KEYS}
+        for key in self.MANAGED_KEYS:
+            os.environ.pop(key, None)
+        # main() now names every missing credential at once and stops before the
+        # transcription step, so a test that reaches it must supply all three.
         os.environ["DASHSCOPE_API_KEY"] = "sk-test-not-a-real-key"
+        os.environ["ALIYUN_WORKSPACE_ID"] = "llm-test-workspace"
+        os.environ["OKFILE_TOKEN"] = "okfile-test-token"
 
     def tearDown(self):
         for key, value in self._saved.items():
             os.environ.pop(key, None)
             if value is not None:
                 os.environ[key] = value
-        if self._saved_key is None:
-            os.environ.pop("DASHSCOPE_API_KEY", None)
-        else:
-            os.environ["DASHSCOPE_API_KEY"] = self._saved_key
 
     def test_env_file_model_is_resolved_by_main(self):
         captured: dict = {}
 
-        def fake_load_env(path):
+        def fake_prepare_env(explicit):
             os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_FUN_ASR
+            return EnvFileSearch(path=None, candidates=(), explicit=False)
 
         def fake_transcribe(args, api_key, model):
             captured["model"] = model
@@ -244,7 +255,7 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
 
         argv = ["transcribe_api.py", "lesson.mp4", "--confirm-external-processing", "--env-file", "unused.env"]
         with mock.patch.object(sys, "argv", argv), \
-             mock.patch.object(transcribe_api, "load_env", side_effect=fake_load_env), \
+             mock.patch.object(transcribe_api, "prepare_env", side_effect=fake_prepare_env), \
              mock.patch.object(transcribe_api, "transcribe_aliyun_fun_asr", side_effect=fake_transcribe):
             exit_code = transcribe_api.main()
 
@@ -256,8 +267,9 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
         # the only path a workflow run has to inline hotwords.
         captured: dict = {}
 
-        def fake_load_env(path):
+        def fake_prepare_env(explicit):
             os.environ["ALIYUN_ASR_HOTWORDS_FILE"] = "hotwords.json"
+            return EnvFileSearch(path=None, candidates=(), explicit=False)
 
         def fake_transcribe(args, api_key, model):
             captured["hotwords_file"] = args.hotwords_file
@@ -265,7 +277,7 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
 
         argv = ["transcribe_api.py", "lesson.mp4", "--confirm-external-processing"]
         with mock.patch.object(sys, "argv", argv), \
-             mock.patch.object(transcribe_api, "load_env", side_effect=fake_load_env), \
+             mock.patch.object(transcribe_api, "prepare_env", side_effect=fake_prepare_env), \
              mock.patch.object(transcribe_api, "transcribe_aliyun_fun_asr", side_effect=fake_transcribe):
             transcribe_api.main()
 
@@ -275,12 +287,13 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
         self.assertEqual(os.environ["ALIYUN_ASR_HOTWORDS_FILE"], "hotwords.json")
 
     def test_unsupported_env_file_model_fails_before_any_work(self):
-        def fake_load_env(path):
+        def fake_prepare_env(explicit):
             os.environ["ALIYUN_ASR_MODEL"] = "paraformer-v2"
+            return EnvFileSearch(path=None, candidates=(), explicit=False)
 
         argv = ["transcribe_api.py", "lesson.mp4", "--confirm-external-processing"]
         with mock.patch.object(sys, "argv", argv), \
-             mock.patch.object(transcribe_api, "load_env", side_effect=fake_load_env), \
+             mock.patch.object(transcribe_api, "prepare_env", side_effect=fake_prepare_env), \
              mock.patch.object(transcribe_api, "transcribe_aliyun_fun_asr") as transcribe_mock:
             exit_code = transcribe_api.main()
 

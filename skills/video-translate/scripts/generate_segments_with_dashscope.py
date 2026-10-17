@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import time
 import urllib.error
@@ -14,7 +15,11 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from common import normalize_word
+from common import (
+    normalize_word,
+    prepare_env_file,
+    read_env_file,
+)
 from source_subtitle_reference import load_source_subtitle, references_by_asr_segment
 
 
@@ -79,7 +84,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("transcript_words", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--cache", type=Path, default=None)
-    parser.add_argument("--env", type=Path, default=PROJECT_ROOT / ".env")
+    parser.add_argument(
+        "--env",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit local .env path. Omit to discover one: $ALIYUN_ENV_FILE, then the nearest "
+            ".env at or above the Skill directory and the current directory that declares a "
+            "provider credential key."
+        ),
+    )
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
@@ -117,17 +131,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_env(path: Path) -> dict[str, str]:
-    env: dict[str, str] = {}
-    if not path.exists():
-        return env
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        env[key.strip()] = value.strip().strip('"').strip("'")
-    return env
+def resolve_env(explicit: Path | None) -> dict[str, str]:
+    """Effective provider environment: the local .env merged with the process.
+
+    The real environment wins, so an exported credential keeps working, and the
+    file supplies whatever the process does not define. Discovery is anchored on
+    the Skill directory, so it does not depend on the caller's working directory.
+    """
+    search = prepare_env_file(explicit, start=Path(__file__).resolve().parent)
+    file_env = read_env_file(search.path) if search.path is not None else {}
+    return {**file_env, **os.environ}
 
 
 def resolve_helper_model(requested: str) -> tuple[str, str]:
@@ -718,10 +731,10 @@ def main() -> int:
             "Refusing external processing without --confirm-external-processing. "
             "This sends subtitle text to Alibaba qwen-mt-plus."
         )
-    env = load_env(args.env)
+    env = resolve_env(args.env)
     api_key = env.get("DASHSCOPE_API_KEY")
     if not api_key:
-        raise SystemExit("DASHSCOPE_API_KEY is missing.")
+        raise SystemExit("DASHSCOPE_API_KEY is missing from the local .env and the process environment.")
     model, model_source = resolve_helper_model(args.model)
     if model_source == "fixed-default":
         print(f"Helper model: {model} (fixed production helper).", flush=True)

@@ -79,6 +79,16 @@ OKFILE_TOKEN=...
 
 ```
 
+### Where Credentials Are Read From
+
+The local `.env` is discovered, not assumed to sit beside the scripts:
+
+1. an explicit `--env-file` (also `--env` for the segment helper), then
+2. `$ALIYUN_ENV_FILE`, then
+3. the nearest `.env` at or above the Skill directory, then the current directory, accepted only when that file declares at least one of `DASHSCOPE_API_KEY`, `ALIYUN_WORKSPACE_ID`, or `OKFILE_TOKEN`.
+
+The wrapper resolves the file once and passes the resolved path to every step that needs credentials, so a step that runs with the Skill directory as its working directory still finds a `.env` kept at a workspace root. Every step reports the file it used; when none is found it names every path it searched instead of continuing silently. A caller-named file that does not exist stops the run immediately.
+
 Never print or reveal real API keys.
 
 Local requirements:

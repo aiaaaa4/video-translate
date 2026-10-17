@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +11,11 @@ from typing import Any, Iterable
 
 
 WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
+
+# Provider credentials this Skill needs, and how the local env file is located.
+CREDENTIAL_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN")
+ENV_FILE_VARIABLE = "ALIYUN_ENV_FILE"
+ENV_SEARCH_DEPTH = 4
 
 # Shared token sets used by QA checks and the deterministic auto-fixer.
 FILLER_RAW_TOKENS = {"m", "um", "uh", "er", "eh", "hmm"}
@@ -384,3 +391,130 @@ def split_source_line(text: str, max_width: float | None) -> list[str]:
     if remaining:
         lines.append(" ".join(remaining))
     return lines or [text]
+
+
+@dataclass(frozen=True)
+class EnvFileSearch:
+    """Outcome of locating the local env file that holds provider credentials.
+
+    ``path`` is the file to use, or None when nothing usable was found.
+    ``candidates`` lists every path that was considered, in order, so a caller
+    can report exactly where it looked instead of failing silently.
+    ``explicit`` distinguishes a caller-named path from a discovered one.
+    """
+
+    path: Path | None
+    candidates: tuple[Path, ...]
+    explicit: bool
+
+
+def parse_env_text(text: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    try:
+        return parse_env_text(path.read_text(encoding="utf-8"))
+    except OSError:
+        return {}
+
+
+def env_file_declares_credentials(path: Path) -> bool:
+    """True when the file names at least one credential this Skill needs.
+
+    This guards the upward search: an unrelated project's `.env` must never be
+    adopted silently just because it happens to sit in a parent directory.
+    """
+    return any(key in read_env_file(path) for key in CREDENTIAL_KEYS)
+
+
+def env_search_candidates(*, start: Path | None = None, depth: int = ENV_SEARCH_DEPTH) -> list[Path]:
+    """`.env` paths to consider, nearest first, anchored on `start` then the cwd."""
+    anchors = [Path(start)] if start is not None else []
+    anchors.append(Path.cwd())
+    candidates: list[Path] = []
+    for anchor in anchors:
+        try:
+            resolved = anchor.resolve()
+        except OSError:
+            continue
+        for base in [resolved, *list(resolved.parents)[:depth]]:
+            candidate = base / ".env"
+            if candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
+def search_env_file(explicit: Path | None = None, *, start: Path | None = None) -> EnvFileSearch:
+    """Locate the local `.env` used for provider credentials.
+
+    Order: an explicit path, then ``$ALIYUN_ENV_FILE``, then the nearest `.env`
+    at or above `start` (normally the script directory, which keeps discovery
+    independent of the caller's working directory) followed by the current
+    directory. A discovered file is used only when it declares a credential key.
+
+    A caller-named file is reported as missing rather than ignored, so the
+    caller can fail loudly instead of continuing without credentials.
+    """
+    named = explicit
+    if named is None:
+        from_environment = (os.environ.get(ENV_FILE_VARIABLE) or "").strip()
+        if from_environment:
+            named = Path(from_environment)
+    if named is not None:
+        resolved_named = named.expanduser()
+        usable = resolved_named if resolved_named.is_file() else None
+        return EnvFileSearch(path=usable, candidates=(resolved_named,), explicit=True)
+
+    candidates = env_search_candidates(start=start)
+    for candidate in candidates:
+        if candidate.is_file() and env_file_declares_credentials(candidate):
+            return EnvFileSearch(path=candidate, candidates=tuple(candidates), explicit=False)
+    return EnvFileSearch(path=None, candidates=tuple(candidates), explicit=False)
+
+
+def apply_env_file(path: Path) -> None:
+    """Export an env file into the process; real environment values win."""
+    for key, value in read_env_file(path).items():
+        os.environ.setdefault(key, value)
+
+
+def describe_env_search(search: EnvFileSearch) -> str:
+    if search.path is not None:
+        return f"Using env file: {search.path}"
+    if search.explicit:
+        return (
+            f"Env file not found: {search.candidates[0]}. "
+            "Create it, or omit the explicit path so the local .env is discovered automatically."
+        )
+    listed = "\n".join(f"  - {candidate}" for candidate in search.candidates)
+    return f"No .env with provider credentials was found. Searched:\n{listed}"
+
+
+def prepare_env_file(
+    explicit: Path | None = None,
+    *,
+    start: Path | None = None,
+    report: bool = True,
+) -> EnvFileSearch:
+    """Locate the local env file, export it, and report which file was used.
+
+    The single entry point for every script that needs provider credentials, so
+    they all resolve the same file in the same order and none of them fails
+    silently when it is absent.
+    """
+    search = search_env_file(explicit, start=start)
+    if search.path is not None:
+        apply_env_file(search.path)
+        if report:
+            print(f"Using env file: {search.path}", flush=True)
+    elif report:
+        print(describe_env_search(search), file=sys.stderr)
+    return search

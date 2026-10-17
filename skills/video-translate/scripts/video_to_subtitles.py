@@ -14,7 +14,11 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from common import read_json, write_json
+from common import (
+    prepare_env_file,
+    read_json,
+    write_json,
+)
 from media_probe import AUDIO_SUFFIXES, VIDEO_SUFFIXES, is_supported_audio, is_supported_video
 from subtitle_layout import LAYOUT_NAMES, bind_subtitle_layout, resolve_layout
 
@@ -165,6 +169,16 @@ def parse_args() -> argparse.Namespace:
         "--confirm-external-processing",
         action="store_true",
         help="Required acknowledgement before audio prepared from the selected video is sent to OkFile and Alibaba services.",
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit local .env path, forwarded to every credential-using step. Omit to "
+            "discover one: $ALIYUN_ENV_FILE, then the nearest .env at or above the Skill "
+            "directory and the current directory that declares a provider credential key."
+        ),
     )
     parser.add_argument("--skip-env-check", action="store_true")
     return parser.parse_args()
@@ -794,6 +808,7 @@ def ensure_ai_segments(
     domain_name: str,
     source_subtitle: Path | None,
     translation_context: Path,
+    env_file: Path | None = None,
 ) -> None:
     segments = work_dir / "segments.txt"
     if segments.exists():
@@ -848,6 +863,8 @@ def ensure_ai_segments(
         "1.0",
         "--confirm-external-processing",
     ]
+    if env_file is not None:
+        cmd.extend(["--env", str(env_file)])
     if screen_context.exists() and screen_context.stat().st_size > 0:
         cmd.extend(["--screen-context", str(screen_context)])
     if source_subtitle:
@@ -909,6 +926,7 @@ def ensure_transcript(
     transcript_dir: Path,
     language: str,
     confirm_external_processing: bool,
+    env_file: Path | None = None,
 ) -> None:
     transcript_path = transcript_dir / "transcript_words.json"
     if transcript_path.exists():
@@ -934,6 +952,8 @@ def ensure_transcript(
         language,
         "--confirm-external-processing",
     ]
+    if env_file is not None:
+        command.extend(["--env-file", str(env_file)])
     if is_supported_audio(media):
         command.extend(["--workflow-video", str(workflow_video)])
     run_step(command)
@@ -1625,6 +1645,14 @@ def final_qc_gate(work_dir: Path) -> bool:
 def main() -> int:
     args = parse_args()
     started_at = time.monotonic()
+    # Resolve the credential file once and forward the resolved path to every
+    # step that needs it. The steps run with this directory as cwd, so without
+    # this they would look for `.env` here while the credentials may live in a
+    # workspace root above it.
+    env_search = prepare_env_file(args.env_file, start=Path(__file__).resolve().parent)
+    env_file = env_search.path
+    if env_search.explicit and env_file is None:
+        return 2
     try:
         media, project_dir, _input_was_directory = resolve_media_input(args.media)
     except RuntimeError as error:
@@ -1719,13 +1747,18 @@ def main() -> int:
     if not args.skip_env_check:
         record_step_status(work_dir, "environment", "running")
         step_started = time.monotonic()
-        run_step([sys.executable, "scripts/check_env.py"])
+        check_env_command = [sys.executable, "scripts/check_env.py"]
+        if env_file is not None:
+            check_env_command.extend(["--env-file", str(env_file)])
+        run_step(check_env_command)
         record_step_timing(work_dir, "environment", time.monotonic() - step_started)
         record_step_status(work_dir, "environment", "done")
 
     record_step_status(work_dir, "transcription", "running")
     step_started = time.monotonic()
-    ensure_transcript(asr_media, media, transcript_dir, args.language, args.confirm_external_processing)
+    ensure_transcript(
+        asr_media, media, transcript_dir, args.language, args.confirm_external_processing, env_file
+    )
     record_step_timing(work_dir, "transcription", time.monotonic() - step_started, f"ASR language={args.language}")
     record_step_status(work_dir, "transcription", "done")
 
@@ -1761,6 +1794,7 @@ def main() -> int:
             args.domain_name,
             source_subtitle,
             work_dir / "global_review" / "source-analysis" / "translation-context.json",
+            env_file,
         )
     elif not agent_translation_gate(work_dir):
         record_step_timing(work_dir, "ai_segments", time.monotonic() - step_started, "waiting for Agent-native translation")

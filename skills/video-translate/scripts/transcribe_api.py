@@ -17,7 +17,14 @@ from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from common import srt_time, write_json
+from common import (
+    CREDENTIAL_KEYS,
+    EnvFileSearch,
+    describe_env_search,
+    prepare_env_file,
+    srt_time,
+    write_json,
+)
 from media_probe import is_supported_audio, is_supported_video
 
 
@@ -205,7 +212,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default=None, help="Provider model. Defaults to provider-specific choice.")
     parser.add_argument("--language", default="en", help="Source language hint such as en, fr, es, it.")
     parser.add_argument("--out-dir", type=Path, default=Path("runs/api-transcript"))
-    parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        help=(
+            "Explicit local .env path. Omit to discover one: $ALIYUN_ENV_FILE, then the nearest "
+            ".env at or above the Skill directory and the current directory that declares a "
+            "provider credential key."
+        ),
+    )
     parser.add_argument("--workspace-id", default=None, help="Alibaba Model Studio workspace ID.")
     parser.add_argument("--region", default=None, help="Alibaba region, for example cn-beijing.")
     parser.add_argument("--vocabulary-id", default=None, help="Precompiled Alibaba hotword vocabulary ID.")
@@ -229,17 +245,20 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_env(path: Path) -> None:
-    if not path.exists():
-        return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+def prepare_env(explicit: Path | None) -> EnvFileSearch:
+    """Resolve and load the local env file, reporting exactly which one was used.
+
+    Anchored on the Skill directory rather than the caller's working directory,
+    because this runs with the Skill directory as cwd while the credentials may
+    live in a workspace root above it. A caller-named path that does not exist is
+    reported so the caller stops, instead of continuing without credentials and
+    later failing in a way that looks like a provider outage.
+    """
+    return prepare_env_file(explicit, start=Path(__file__).resolve().parent)
+
+
+def missing_credentials() -> list[str]:
+    return [key for key in CREDENTIAL_KEYS if not has_real_secret(os.environ.get(key))]
 
 
 def has_real_secret(value: str | None) -> bool:
@@ -604,6 +623,22 @@ def download_json(url: str) -> dict:
 CONTRACTION_SUFFIXES = {"m", "re", "ve", "ll", "d", "s", "t"}
 
 
+def word_confidence(raw_word: dict) -> float:
+    """Read a word's confidence from the provider response.
+
+    The transcription result carries `confidence` per word. It was previously
+    discarded and hardcoded to 0.0, which threw away data the word table is
+    supposed to preserve. An absent value stays 0.0 so the field keeps its type.
+    """
+    raw = raw_word.get("confidence")
+    if raw is None:
+        return 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def normalize_aliyun_sentence_words(raw_words: list[dict]) -> list[dict]:
     words: list[dict] = []
     pending_apostrophe: dict | None = None
@@ -614,6 +649,7 @@ def normalize_aliyun_sentence_words(raw_words: list[dict]) -> list[dict]:
             continue
         start = float(raw_word["begin_time"]) / 1000
         end = float(raw_word["end_time"]) / 1000
+        confidence = word_confidence(raw_word)
 
         if text in {"'", "’"}:
             pending_apostrophe = {"start": start, "end": end}
@@ -632,7 +668,7 @@ def normalize_aliyun_sentence_words(raw_words: list[dict]) -> list[dict]:
                 "word": text,
                 "start": start,
                 "end": end,
-                "probability": 0.0,
+                "probability": confidence,
             }
         )
 
@@ -833,7 +869,9 @@ def main() -> int:
     started_at = time.monotonic()
     # Load the local env file before resolving the model, so ALIYUN_ASR_MODEL,
     # ALIYUN_ASR_VOCABULARY_ID, and ALIYUN_ASR_HOTWORDS_FILE from `.env` apply.
-    load_env(args.env_file)
+    env_search = prepare_env(args.env_file)
+    if env_search.explicit and env_search.path is None:
+        return 2
     provider_cfg = PROVIDERS[args.provider]
     try:
         model = resolve_asr_model(args.model, provider_cfg)
@@ -855,13 +893,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    api_key = os.environ.get(provider_cfg["key_env"])
-    if not has_real_secret(api_key):
-        print(
-            f"Missing API key. Set {provider_cfg['key_env']} in {args.env_file} or your environment.",
-            file=sys.stderr,
-        )
+    # Name every missing credential at once, with the paths that were searched, so
+    # a configuration problem is never misread as a provider outage. The provider
+    # key is covered here rather than by a separate earlier check, which would
+    # return before the complete diagnosis could be printed.
+    missing = missing_credentials()
+    if missing:
+        print(f"Missing provider credentials: {', '.join(missing)}.", file=sys.stderr)
+        print(describe_env_search(env_search), file=sys.stderr)
         return 2
+    api_key = os.environ.get(provider_cfg["key_env"])
 
     result = transcribe_aliyun_fun_asr(args, api_key, model)
     elapsed = time.monotonic() - started_at
