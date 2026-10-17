@@ -80,7 +80,7 @@ DISPLAY_TRIM_CHARS = " ,;:，。！？；：、"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate segments.txt from Fun-ASR transcript using DashScope translation.")
+    parser = argparse.ArgumentParser(description="Generate segments.txt from the ASR transcript using DashScope translation.")
     parser.add_argument("transcript_words", type=Path)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--cache", type=Path, default=None)
@@ -286,7 +286,7 @@ def boundary_map(reference_norms: list[str], raw_norms: list[str], boundary: int
 
 
 def reference_text_for_raw_span(reference_text: str, raw_words: list[str]) -> str | None:
-    """Crop a reference cue to the lexical span owned by one Fun-ASR segment.
+    """Crop a reference cue to the lexical span owned by one ASR segment.
 
     Reference cues often straddle ASR boundaries. They may correct spelling, but
     they must never lend leading/trailing words to the current ASR segment.
@@ -756,7 +756,7 @@ def main() -> int:
     if reference_stats.get("reference_disabled"):
         print(
             "Source subtitle reference was disabled because most mapped text failed lexical "
-            "scope checks; using Fun-ASR text and boundaries only.",
+            "scope checks; using ASR text and boundaries only.",
             flush=True,
         )
     translation_context, translation_context_sha256 = load_translation_context(args.translation_context)

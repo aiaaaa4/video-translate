@@ -71,7 +71,7 @@ PROTECTED_PROJECT_DIRECTORIES = GENERIC_PARENT_TITLES | {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the fixed video subtitle workflow: ffmpeg -> OkFile -> Fun-ASR -> selected translation provider -> subtitles."
+        description="Run the fixed video subtitle workflow: local normalize and chunk -> synchronous Alibaba ASR -> selected translation provider -> subtitles."
     )
     parser.add_argument(
         "media",
@@ -114,7 +114,7 @@ def parse_args() -> argparse.Namespace:
         "--source-subtitle",
         type=Path,
         default=None,
-        help="Optional original-language SRT/VTT used to correct ASR text while preserving Fun-ASR word timestamps.",
+        help="Optional original-language SRT/VTT used to correct ASR text while preserving the ASR word timestamps.",
     )
     parser.add_argument(
         "--keep-workflow-inputs",
@@ -168,7 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--confirm-external-processing",
         action="store_true",
-        help="Required acknowledgement before audio prepared from the selected video is sent to OkFile and Alibaba services.",
+        help="Required acknowledgement before audio prepared from the selected video is sent to the Alibaba ASR service (and to OkFile only on the filetrans fallback).",
     )
     parser.add_argument(
         "--env-file",
@@ -1075,7 +1075,7 @@ def classify_failure(message: str) -> tuple[str, str, list[str]]:
     if "dashscope" in lower or "aliyun" in lower or "workspace" in lower:
         return (
             "VTZ-E004",
-            "Alibaba Fun-ASR / DashScope failure",
+            "Alibaba ASR / DashScope failure",
             [
                 "Check DASHSCOPE_API_KEY, ALIYUN_WORKSPACE_ID, ALIYUN_REGION, account balance, and Alibaba task status.",
                 "If a cached Alibaba task failed, rerun with the same --run-id; the workflow will resubmit when the previous task is terminal failed.",
@@ -1677,7 +1677,7 @@ def main() -> int:
         )
         print(
             "Refusing external processing without --confirm-external-processing. "
-            f"This workflow uploads the selected audio to OkFile, sends its URL to Alibaba Fun-ASR, "
+            f"This workflow sends the selected audio to the Alibaba ASR service (OkFile only on the filetrans fallback), "
             f"and processes transcript text with {text_destination}.",
             file=sys.stderr,
         )

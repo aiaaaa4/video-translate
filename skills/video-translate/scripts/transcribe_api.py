@@ -58,7 +58,7 @@ ASR_SUPER_HOTWORD_WEIGHT = 50
 
 PROVIDERS = {
     # Provider id kept stable for existing runs and CLI callers; the family now
-    # covers the Qwen-Audio-3.x-ASR-Flash-Filetrans and Fun-ASR model families,
+    # covers the Qwen-Audio-3.x synchronous and filetrans families plus Fun-ASR,
     # which share one HTTP endpoint and one result schema.
     "aliyun-fun-asr": {
         "key_env": "DASHSCOPE_API_KEY",
@@ -226,7 +226,7 @@ def request_bytes(request: Request, *, timeout: float, label: str) -> bytes:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Internal Fun-ASR transcription helper with word timestamps.")
+    parser = argparse.ArgumentParser(description="Internal Alibaba ASR transcription helper with word timestamps.")
     parser.add_argument("media", type=Path, help="Input video, or workflow-prepared audio.")
     parser.add_argument("--provider", choices=sorted(PROVIDERS), default="aliyun-fun-asr")
     parser.add_argument("--model", default=None, help="Provider model. Defaults to provider-specific choice.")
@@ -256,7 +256,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--confirm-external-processing",
         action="store_true",
-        help="Required acknowledgement before the selected audio is uploaded to OkFile and submitted to Alibaba Fun-ASR.",
+        help="Required acknowledgement before the selected audio is submitted to the Alibaba ASR service (and uploaded to OkFile only on the filetrans fallback).",
     )
     parser.add_argument("--poll-interval", type=float, default=10.0, help="Seconds between async task polls.")
     parser.add_argument("--timeout", type=float, default=7200.0, help="Async task timeout in seconds.")
@@ -899,7 +899,7 @@ def transcribe_aliyun_fun_asr(args: argparse.Namespace, api_key: str, model: str
         submit = json.loads(submit_path.read_text(encoding="utf-8"))
         print(f"Using existing Aliyun task submission: {submit_path}", flush=True)
     else:
-        print(f"Submitting Aliyun Fun-ASR task model={model} region={region}...", flush=True)
+        print(f"Submitting Aliyun filetrans task model={model} region={region}...", flush=True)
         submit = submit_aliyun_fun_asr(
             api_key=api_key,
             workspace_id=workspace_id,
@@ -1017,7 +1017,7 @@ def main() -> int:
     if not args.confirm_external_processing:
         print(
             "Refusing external processing without --confirm-external-processing. "
-            "This uploads the selected audio to OkFile and sends its temporary URL to Alibaba ASR.",
+            "This sends the selected audio to the Alibaba ASR service (OkFile upload only on the filetrans fallback).",
             file=sys.stderr,
         )
         return 2

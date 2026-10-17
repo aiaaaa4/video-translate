@@ -6,7 +6,7 @@ Use this optional module when a video depends on visible screen text, charts, UI
 
 The same multimodal AI that performs segmentation and translation should perform this step when possible. Do not bind the workflow to a specific model, platform, operating system, or product.
 
-The module is lightweight context, not a replacement for ASR or word timestamps. Fun-ASR remains the transcript source of truth, and `SRC_RAW` must still come only from the word stream.
+The module is lightweight context, not a replacement for ASR or word timestamps. The fixed ASR model remains the transcript source of truth, and `SRC_RAW` must still come only from the word stream.
 
 Screen context is off by default. Enable it only after the agent has reviewed the user request, filename, ASR transcript, and visible-context signals and has a concrete reason to believe screenshots will improve translation quality.
 

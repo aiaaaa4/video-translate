@@ -32,7 +32,8 @@ ENV_SETUP_HINTS = {
         "Copy the workspace ID from the Alibaba Model Studio console (https://bailian.console.aliyun.com/)."
     ),
     "OKFILE_TOKEN": (
-        "Register at https://www.okfile.com/ and create/copy the API key from "
+        "Optional: only the filetrans fallback uploads through OkFile. Register at "
+        "https://www.okfile.com/ and create/copy the API key from "
         "https://www.okfile.com/en/account/api-keys."
     ),
 }
