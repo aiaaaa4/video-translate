@@ -25,17 +25,33 @@ from common import (
     srt_time,
     write_json,
 )
+from asr_sync_chunked import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_MAX_CHUNK_SECONDS,
+    DEFAULT_MP3_KBPS,
+    DEFAULT_RETRIES,
+    transcribe_chunked_sync,
+)
 from media_probe import is_supported_audio, is_supported_video
 
 
+# Synchronous models take the audio inline as Base64 and cap a request at five
+# minutes, so the default path normalizes, chunks, and stitches instead of
+# handing a provider a public URL to pull.
+ASR_MODEL_QWEN_AUDIO_SYNC_31 = "qwen-audio-3.1-asr-flash"
+ASR_MODEL_QWEN_AUDIO_SYNC_30 = "qwen-audio-3.0-asr-flash"
+# Asynchronous models pull a public URL and are kept as an explicit fallback.
 ASR_MODEL_QWEN_AUDIO_31 = "qwen-audio-3.1-asr-flash-filetrans"
 ASR_MODEL_QWEN_AUDIO_30 = "qwen-audio-3.0-asr-flash-filetrans"
 ASR_MODEL_FUN_ASR = "fun-asr"
-# The fixed ASR stack. Every model here must return sentence-level `words[]` with
-# word timestamps, because those timestamps are the only subtitle boundary truth.
-SUPPORTED_ASR_MODELS = (ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30, ASR_MODEL_FUN_ASR)
+SYNC_ASR_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_SYNC_31, ASR_MODEL_QWEN_AUDIO_SYNC_30})
+ASYNC_ASR_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30, ASR_MODEL_FUN_ASR})
+# The fixed ASR stack. Every model here must return word-level timestamps,
+# because those timestamps are the only subtitle boundary truth.
+SUPPORTED_ASR_MODELS = tuple(sorted(SYNC_ASR_MODELS | ASYNC_ASR_MODELS))
+DEFAULT_ASR_MODEL = ASR_MODEL_QWEN_AUDIO_SYNC_31
 # Inline ("instant") hotwords are accepted only by the Qwen-Audio-3.x-ASR-Flash family.
-INLINE_HOTWORD_MODELS = frozenset({ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30})
+INLINE_HOTWORD_MODELS = frozenset(SYNC_ASR_MODELS | {ASR_MODEL_QWEN_AUDIO_31, ASR_MODEL_QWEN_AUDIO_30})
 MAX_ASR_HOTWORDS = 2000
 MAX_ASR_SUPER_HOTWORDS = 50
 ASR_SUPER_HOTWORD_WEIGHT = 50
@@ -46,7 +62,7 @@ PROVIDERS = {
     # which share one HTTP endpoint and one result schema.
     "aliyun-fun-asr": {
         "key_env": "DASHSCOPE_API_KEY",
-        "default_model": ASR_MODEL_QWEN_AUDIO_31,
+        "default_model": DEFAULT_ASR_MODEL,
         "supported_models": SUPPORTED_ASR_MODELS,
     },
 }
@@ -77,8 +93,12 @@ def resolve_asr_model(requested: str | None, provider_cfg: dict) -> str:
 
 
 def provider_label(model: str) -> str:
-    """Report the ASR family that actually produced the transcript."""
-    return "aliyun-qwen-audio-asr" if model in INLINE_HOTWORD_MODELS else "aliyun-fun-asr"
+    """Report the transport and family that actually produced the transcript."""
+    if model in SYNC_ASR_MODELS:
+        return "aliyun-qwen-audio-asr-sync"
+    if model in ASYNC_ASR_MODELS and model != ASR_MODEL_FUN_ASR:
+        return "aliyun-qwen-audio-asr-filetrans"
+    return "aliyun-fun-asr"
 
 
 def validate_hotword_text(text: str) -> str | None:
@@ -257,8 +277,19 @@ def prepare_env(explicit: Path | None) -> EnvFileSearch:
     return prepare_env_file(explicit, start=Path(__file__).resolve().parent)
 
 
-def missing_credentials() -> list[str]:
-    return [key for key in CREDENTIAL_KEYS if not has_real_secret(os.environ.get(key))]
+def required_credentials(model: str | None = None) -> tuple[str, ...]:
+    """Credentials this path actually needs.
+
+    OkFile only exists to hand the asynchronous fallback a public URL, so the
+    synchronous path must not demand an OkFile token it never uses.
+    """
+    if model in SYNC_ASR_MODELS:
+        return tuple(key for key in CREDENTIAL_KEYS if key != "OKFILE_TOKEN")
+    return CREDENTIAL_KEYS
+
+
+def missing_credentials(model: str | None = None) -> list[str]:
+    return [key for key in required_credentials(model) if not has_real_secret(os.environ.get(key))]
 
 
 def has_real_secret(value: str | None) -> bool:
@@ -725,6 +756,100 @@ def normalize_aliyun_response(media: Path, model: str, language: str, raw: dict)
     }
 
 
+def env_positive_float(name: str, default: float) -> float:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise RuntimeError(f"{name} must be a number, got {raw!r}") from None
+    if value <= 0:
+        raise RuntimeError(f"{name} must be positive, got {value}")
+    return value
+
+
+def env_positive_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(f"{name} must be an integer, got {raw!r}") from None
+    if value <= 0:
+        raise RuntimeError(f"{name} must be positive, got {value}")
+    return value
+
+
+def post_sync_asr(url: str, api_key: str, payload: dict) -> dict:
+    """One synchronous ASR call; SSE is disabled so the reply is a single JSON body."""
+    return http_json_request(
+        url,
+        api_key,
+        method="POST",
+        payload=payload,
+        headers={"X-DashScope-SSE": "disable"},
+    )
+
+
+def transcribe_with_sync_model(
+    args: argparse.Namespace,
+    api_key: str,
+    model: str,
+    workspace_id: str,
+    region: str,
+    hotwords: dict[str, int] | None,
+) -> int:
+    """Chunked synchronous transcription. Nothing is uploaded to OkFile."""
+    max_seconds = env_positive_float("ALIYUN_ASR_SYNC_MAX_SECONDS", DEFAULT_MAX_CHUNK_SECONDS)
+    if max_seconds > 300:
+        raise RuntimeError(
+            "ALIYUN_ASR_SYNC_MAX_SECONDS must not exceed 300 seconds, the synchronous model's per-request limit."
+        )
+    concurrency = env_positive_int("ALIYUN_ASR_SYNC_CONCURRENCY", DEFAULT_CONCURRENCY)
+    retries = env_positive_int("ALIYUN_ASR_SYNC_RETRIES", DEFAULT_RETRIES)
+    bitrate_kbps = env_positive_int("ALIYUN_ASR_MP3_KBPS", DEFAULT_MP3_KBPS)
+
+    print(
+        f"Transcribing with the synchronous ASR model {model}; chunks of at most {max_seconds:.0f}s, "
+        f"concurrency {concurrency}, {bitrate_kbps}kbps mp3. No OkFile upload on this path.",
+        flush=True,
+    )
+    transcript = transcribe_chunked_sync(
+        media=args.media,
+        out_dir=args.out_dir,
+        model=model,
+        language=args.language,
+        api_key=api_key,
+        base_url=aliyun_base_url(workspace_id, region),
+        hotwords=hotwords,
+        max_chunk_seconds=max_seconds,
+        concurrency=concurrency,
+        retries=retries,
+        bitrate_kbps=bitrate_kbps,
+        poster=post_sync_asr,
+    )
+
+    write_json(args.out_dir / "transcript_words.json", transcript)
+    write_srt(args.out_dir / "transcript_raw.srt", transcript["segments"])
+    if not args.keep_audio:
+        (args.out_dir / "asr_sync_normalized.mp3").unlink(missing_ok=True)
+        chunk_dir = args.out_dir / "asr_sync_chunks"
+        if chunk_dir.exists():
+            for leftover in chunk_dir.glob("*.mp3"):
+                leftover.unlink(missing_ok=True)
+            chunk_dir.rmdir()
+
+    print(f"Wrote {args.out_dir / 'transcript_words.json'}")
+    print(f"Wrote {args.out_dir / 'transcript_raw.srt'}")
+    print(
+        f"Words: {len(transcript['words'])}; segments: {len(transcript['segments'])}; "
+        f"duration: {transcript['duration']:.1f}s"
+    )
+    return 0
+
+
 def transcribe_aliyun_fun_asr(args: argparse.Namespace, api_key: str, model: str) -> int:
     workspace_id = args.workspace_id or os.environ.get("ALIYUN_WORKSPACE_ID")
     region = args.region or os.environ.get("ALIYUN_REGION") or "cn-beijing"
@@ -749,6 +874,9 @@ def transcribe_aliyun_fun_asr(args: argparse.Namespace, api_key: str, model: str
         return 2
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    if model in SYNC_ASR_MODELS:
+        return transcribe_with_sync_model(args, api_key, model, workspace_id, region, hotwords)
+
     audio_path: Path | None = None
     print("Preparing selected audio for OkFile upload...", flush=True)
     audio_path = extract_audio(args.media, args.out_dir)
@@ -897,7 +1025,7 @@ def main() -> int:
     # a configuration problem is never misread as a provider outage. The provider
     # key is covered here rather than by a separate earlier check, which would
     # return before the complete diagnosis could be printed.
-    missing = missing_credentials()
+    missing = missing_credentials(model)
     if missing:
         print(f"Missing provider credentials: {', '.join(missing)}.", file=sys.stderr)
         print(describe_env_search(env_search), file=sys.stderr)

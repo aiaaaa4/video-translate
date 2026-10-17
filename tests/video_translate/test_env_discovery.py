@@ -137,6 +137,12 @@ class MissingCredentialDiagnosisTest(unittest.TestCase):
             transcribe_api.missing_credentials(),
             ["DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN"],
         )
+        # The default synchronous path never uploads, so it must not demand an
+        # OkFile token it does not use.
+        self.assertEqual(
+            transcribe_api.missing_credentials("qwen-audio-3.1-asr-flash"),
+            ["DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID"],
+        )
 
     def test_transcribe_main_stops_before_work_and_names_the_searched_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,8 +163,9 @@ class MissingCredentialDiagnosisTest(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             transcribe_mock.assert_not_called()
             self.assertIn("Missing provider credentials", captured["stderr"])
-            for key in ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID", "OKFILE_TOKEN"):
+            for key in ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID"):
                 self.assertIn(key, captured["stderr"])
+            self.assertNotIn("OKFILE_TOKEN", captured["stderr"], "the sync default does not use OkFile")
             self.assertIn(str(workdir / ".env"), captured["stderr"])
 
     def test_transcribe_main_rejects_an_explicit_missing_env_file(self):

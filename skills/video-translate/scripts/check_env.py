@@ -18,7 +18,10 @@ from common import (
 from setup_state import mark_initialized
 
 
-REQUIRED_ENV = CREDENTIAL_KEYS
+# The synchronous path never uploads through OkFile, so its token is only
+# needed by the explicit filetrans fallback.
+REQUIRED_ENV = tuple(key for key in CREDENTIAL_KEYS if key != "OKFILE_TOKEN")
+OPTIONAL_ENV = tuple(key for key in CREDENTIAL_KEYS if key == "OKFILE_TOKEN")
 
 ENV_SETUP_HINTS = {
     "DASHSCOPE_API_KEY": (
@@ -104,6 +107,12 @@ def check_env_values(errors: list[str]) -> None:
                 message = f"{message} {hint}"
             errors.append(message)
 
+    for key in OPTIONAL_ENV:
+        if has_real_value(os.environ.get(key)):
+            print(f"{key}: set")
+        else:
+            print(f"{key}: not set (optional; only the filetrans fallback uploads through OkFile)")
+
     region = os.environ.get("ALIYUN_REGION") or "cn-beijing"
     print(f"ALIYUN_REGION: {region}")
 
@@ -133,7 +142,9 @@ def main() -> int:
             "python": platform.python_version(),
             "ffmpeg": bool(shutil.which("ffmpeg")),
             "ffprobe": bool(shutil.which("ffprobe")),
-            "env": {key: has_real_value(os.environ.get(key)) for key in REQUIRED_ENV},
+            "env": {key: has_real_value(os.environ.get(key)) for key in CREDENTIAL_KEYS},
+            "required_env": list(REQUIRED_ENV),
+            "optional_env": list(OPTIONAL_ENV),
             "env_file": str(search.path) if search.path is not None else "",
             "env_file_explicit": search.explicit,
             "env_file_candidates": [str(candidate) for candidate in search.candidates],

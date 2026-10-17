@@ -13,6 +13,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 import transcribe_api  # noqa: E402
 from transcribe_api import (  # noqa: E402
     ASR_MODEL_FUN_ASR,
+    ASR_MODEL_QWEN_AUDIO_SYNC_31,
     EnvFileSearch,
     ASR_MODEL_QWEN_AUDIO_31,
     PROVIDERS,
@@ -37,9 +38,12 @@ class AsrModelSelectionTest(unittest.TestCase):
         if self._saved is not None:
             os.environ["ALIYUN_ASR_MODEL"] = self._saved
 
-    def test_default_model_is_qwen_audio_31_filetrans(self):
-        self.assertEqual(self.provider_cfg["default_model"], ASR_MODEL_QWEN_AUDIO_31)
-        self.assertEqual(resolve_asr_model(None, self.provider_cfg), ASR_MODEL_QWEN_AUDIO_31)
+    def test_default_model_is_the_synchronous_one(self):
+        # The default path takes the audio inline and chunks it; the filetrans
+        # models remain available as an explicit fallback.
+        self.assertEqual(self.provider_cfg["default_model"], ASR_MODEL_QWEN_AUDIO_SYNC_31)
+        self.assertEqual(resolve_asr_model(None, self.provider_cfg), ASR_MODEL_QWEN_AUDIO_SYNC_31)
+        self.assertIn(ASR_MODEL_QWEN_AUDIO_31, transcribe_api.SUPPORTED_ASR_MODELS)
 
     def test_env_var_pins_the_model(self):
         os.environ["ALIYUN_ASR_MODEL"] = ASR_MODEL_FUN_ASR
@@ -56,9 +60,10 @@ class AsrModelSelectionTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             resolve_asr_model(None, self.provider_cfg)
 
-    def test_provider_label_reports_the_real_family(self):
-        self.assertEqual(provider_label(ASR_MODEL_QWEN_AUDIO_31), "aliyun-qwen-audio-asr")
-        self.assertEqual(provider_label("qwen-audio-3.0-asr-flash-filetrans"), "aliyun-qwen-audio-asr")
+    def test_provider_label_reports_the_real_transport(self):
+        self.assertEqual(provider_label(ASR_MODEL_QWEN_AUDIO_SYNC_31), "aliyun-qwen-audio-asr-sync")
+        self.assertEqual(provider_label("qwen-audio-3.0-asr-flash"), "aliyun-qwen-audio-asr-sync")
+        self.assertEqual(provider_label(ASR_MODEL_QWEN_AUDIO_31), "aliyun-qwen-audio-asr-filetrans")
         self.assertEqual(provider_label(ASR_MODEL_FUN_ASR), "aliyun-fun-asr")
 
 
@@ -203,7 +208,7 @@ class AsrWordTimestampTest(unittest.TestCase):
             "properties": {"original_duration_in_milliseconds": 1200},
         }
         transcript = normalize_aliyun_response(Path("a.wav"), ASR_MODEL_QWEN_AUDIO_31, "en", raw)
-        self.assertEqual(transcript["provider"], "aliyun-qwen-audio-asr")
+        self.assertEqual(transcript["provider"], "aliyun-qwen-audio-asr-filetrans")
         self.assertEqual(transcript["model"], ASR_MODEL_QWEN_AUDIO_31)
         self.assertEqual([word["word"] for word in transcript["words"]], ["hello", "world"])
         self.assertEqual(transcript["duration"], 1.2)
