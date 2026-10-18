@@ -2,6 +2,10 @@
 
 本仓库只维护 `aiaaaa4.video-translate` 一个 Skill。版本号以 `registry.json` 为准，详细推理见对应 Git 提交。
 
+## 1.13.3
+
+- 移除 1.13.2 新增的 `name_warnings` 提醒与上传时的 NOTE 提示：只保留根因修复——上传对象名固定为 `asr_upload_<token>.<ext>`，文件名不再进入 URL。
+
 ## 1.13.2
 
 - 修复文件名含 URL 敏感字符导致转写失败：上传对象名改为 `asr_upload_<token>.<ext>`，不再取自用户文件名。`#` 会把 `oss://` 路径截成片段，服务随即报 `BadRequest.ResourceNotExist`（已用同名文件复现并验证修复）。

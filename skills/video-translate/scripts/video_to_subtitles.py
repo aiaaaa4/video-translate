@@ -17,7 +17,6 @@ from pathlib import Path
 from common import (
     prepare_env_file,
     read_json,
-    url_significant_characters,
     write_json,
 )
 from media_probe import AUDIO_SUFFIXES, VIDEO_SUFFIXES, is_supported_audio, is_supported_video
@@ -443,18 +442,7 @@ def inspect_media_input(
     asr_media = resolve_asr_media(media)
     source_subtitle = resolve_source_subtitle(media, explicit_subtitle)
     profile, geometry = resolve_layout(media, requested_layout)
-    name_warnings = []
-    for label, candidate in (("video", media), ("audio", asr_media if asr_media != media else None)):
-        if candidate is None:
-            continue
-        risky = url_significant_characters(candidate.name)
-        if risky:
-            name_warnings.append(
-                f"{label} filename contains {', '.join(risky)}; transcription uploads under a neutral object "
-                f"name, but rename it if another stage builds URLs or shell arguments from it."
-            )
-
-    result = {
+    return {
         "video": str(media),
         "project_directory": str(project_dir),
         "input_was_directory": input_was_directory,
@@ -471,9 +459,6 @@ def inspect_media_input(
         "subtitle_layout_requested": requested_layout,
         "subtitle_layout_resolved": profile.name,
     }
-    if name_warnings:
-        result["name_warnings"] = name_warnings
-    return result
 
 
 def resolve_source_subtitle(media: Path, explicit: Path | None) -> Path | None:

@@ -23,7 +23,6 @@ from common import (
     describe_env_search,
     prepare_env_file,
     srt_time,
-    url_significant_characters,
     write_json,
 )
 from media_probe import is_supported_audio, is_supported_video
@@ -504,13 +503,6 @@ def upload_audio_to_temporary_storage(audio_path: Path, api_key: str, model: str
         method="POST",
     )
     request_bytes(request, timeout=600, label="Model Studio temporary upload")
-    risky = url_significant_characters(audio_path.name)
-    if risky:
-        print(
-            f"NOTE: the source filename contains {', '.join(risky)}, which would change the meaning of a URL; "
-            f"uploading as {object_name} instead.",
-            flush=True,
-        )
     print(
         f"Uploaded {size_mb:.1f} MB as {object_name} to Model Studio temporary storage (valid 48 h, no OSS bucket).",
         flush=True,

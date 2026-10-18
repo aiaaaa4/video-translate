@@ -315,12 +315,6 @@ class UploadObjectNameTest(unittest.TestCase):
     def test_a_name_without_a_usable_extension_falls_back_to_mp3(self):
         self.assertTrue(transcribe_api.upload_object_name(Path("recording #1")).endswith(".mp3"))
 
-    def test_url_significant_characters_are_reported(self):
-        from common import url_significant_characters
-
-        self.assertEqual(url_significant_characters("Yandere #1?x%y"), ["#", "?", "%"])
-        self.assertEqual(url_significant_characters("plain name.mp4"), [])
-
 
 if __name__ == "__main__":
     unittest.main()
