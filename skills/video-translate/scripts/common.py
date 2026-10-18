@@ -13,6 +13,16 @@ from typing import Any, Iterable
 WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
 
 # Provider credentials this Skill needs, and how the local env file is located.
+# Characters that change the meaning of a URL (or are ambiguous in one). A filename
+# containing them is fine on disk but must never become part of a URL.
+URL_SIGNIFICANT_CHARACTERS = "#?%&+="
+
+
+def url_significant_characters(text: str) -> list[str]:
+    """Return the URL-significant characters present in ``text``, in a stable order."""
+    return [character for character in URL_SIGNIFICANT_CHARACTERS if character in text]
+
+
 CREDENTIAL_KEYS = ("DASHSCOPE_API_KEY", "ALIYUN_WORKSPACE_ID")
 ENV_FILE_VARIABLE = "ALIYUN_ENV_FILE"
 ENV_SEARCH_DEPTH = 4

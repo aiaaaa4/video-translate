@@ -23,6 +23,7 @@ from common import (
     describe_env_search,
     prepare_env_file,
     srt_time,
+    url_significant_characters,
     write_json,
 )
 from media_probe import is_supported_audio, is_supported_video
@@ -448,6 +449,24 @@ def fetch_upload_policy(api_key: str, model: str) -> dict:
     return data
 
 
+UPLOAD_OBJECT_STEM = "asr_upload"
+
+
+def upload_object_name(source: Path, *, token: str | None = None) -> str:
+    """A transport-safe object name for the temporary upload.
+
+    The object name becomes part of an ``oss://`` URL, so a ``#`` in the caller's
+    filename turns the rest of the path into a URL fragment and the service looks
+    for a different object (HTTP 400 BadRequest.ResourceNotExist). The upload never
+    needs the original name, so it is replaced with a neutral one that keeps only
+    the extension the service uses to detect the audio format.
+    """
+    suffix = source.suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,5}", suffix):
+        suffix = ".mp3"
+    return f"{UPLOAD_OBJECT_STEM}_{token or uuid.uuid4().hex[:8]}{suffix}"
+
+
 def upload_audio_to_temporary_storage(audio_path: Path, api_key: str, model: str) -> str:
     """Upload the audio into Model Studio's temporary storage and return its oss:// URL."""
     policy = fetch_upload_policy(api_key, model)
@@ -463,7 +482,8 @@ def upload_audio_to_temporary_storage(audio_path: Path, api_key: str, model: str
                 f"Audio is {size_mb:.1f} MB but the temporary upload accepts {limit:.0f} MB; "
                 "lower ALIYUN_ASR_MP3_KBPS or shorten the input."
             )
-    key = f"{policy.get('upload_dir') or ''}/{audio_path.name}".lstrip("/")
+    object_name = upload_object_name(audio_path)
+    key = f"{policy.get('upload_dir') or ''}/{object_name}".lstrip("/")
     fields = {
         "OSSAccessKeyId": str(policy["oss_access_key_id"]),
         "Signature": str(policy["signature"]),
@@ -484,8 +504,15 @@ def upload_audio_to_temporary_storage(audio_path: Path, api_key: str, model: str
         method="POST",
     )
     request_bytes(request, timeout=600, label="Model Studio temporary upload")
+    risky = url_significant_characters(audio_path.name)
+    if risky:
+        print(
+            f"NOTE: the source filename contains {', '.join(risky)}, which would change the meaning of a URL; "
+            f"uploading as {object_name} instead.",
+            flush=True,
+        )
     print(
-        f"Uploaded {size_mb:.1f} MB to Model Studio temporary storage (valid 48 h, no OSS bucket).",
+        f"Uploaded {size_mb:.1f} MB as {object_name} to Model Studio temporary storage (valid 48 h, no OSS bucket).",
         flush=True,
     )
     return f"oss://{key}"

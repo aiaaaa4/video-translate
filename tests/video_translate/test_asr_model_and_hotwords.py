@@ -295,5 +295,32 @@ class AsrEnvFileIntegrationTest(unittest.TestCase):
         transcribe_mock.assert_not_called()
 
 
+class UploadObjectNameTest(unittest.TestCase):
+    """The object name becomes part of an oss:// URL, so it must not carry the
+    caller's filename: a '#' there truncates the path into a URL fragment and the
+    service reports BadRequest.ResourceNotExist for an object that was uploaded."""
+
+    def test_hash_and_query_characters_never_reach_the_object_name(self):
+        for source in ("Yandere High School #1 FIRST DAY.mp3", "a?b.m4a", "a%b&c+d=e.wav"):
+            with self.subTest(source=source):
+                name = transcribe_api.upload_object_name(Path(source))
+                self.assertEqual(name.split(".")[0][:10], "asr_upload")
+                for character in "#?%&+=":
+                    self.assertNotIn(character, name)
+
+    def test_the_extension_is_preserved_for_format_detection(self):
+        self.assertTrue(transcribe_api.upload_object_name(Path("x #1.m4a")).endswith(".m4a"))
+        self.assertTrue(transcribe_api.upload_object_name(Path("x #1.wav")).endswith(".wav"))
+
+    def test_a_name_without_a_usable_extension_falls_back_to_mp3(self):
+        self.assertTrue(transcribe_api.upload_object_name(Path("recording #1")).endswith(".mp3"))
+
+    def test_url_significant_characters_are_reported(self):
+        from common import url_significant_characters
+
+        self.assertEqual(url_significant_characters("Yandere #1?x%y"), ["#", "?", "%"])
+        self.assertEqual(url_significant_characters("plain name.mp4"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
